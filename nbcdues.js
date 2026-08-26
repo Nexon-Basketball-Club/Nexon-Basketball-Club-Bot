@@ -22,29 +22,56 @@ const scriptName = "nbcdues";
 // 설정
 // ============================================================
 
-function loadConfig() {
-  const paths = [
-    "/storage/emulated/0/msgbot/Bots/nbcdues/config.json",
-    "/sdcard/msgbot/Bots/nbcdues/config.json",
-    "Bots/config.json",
-    "config.json"
-  ];
+const CONFIG_PATHS = [
+  "/storage/emulated/0/msgbot/Bots/nbcdues/config.json",
+  "/sdcard/msgbot/Bots/nbcdues/config.json",
+  "Bots/config.json",
+  "config.json"
+];
 
-  for (let i = 0; i < paths.length; i++) {
+/**
+ * 설정은 **최상단이 아니라 명령어를 받을 때** 읽는다.
+ *
+ * 최상단에서 읽으면 config.json이 없을 때 스크립트 로드가 통째로 실패하고, 그러면
+ * 봇이 아무 반응도 안 한다 — 무엇이 잘못됐는지 채팅에서 알 길이 없다. 지연 로드로
+ * 두면 설정 문제가 "봇이 죽었다"가 아니라 **답장 한 줄**로 나온다.
+ *
+ * 성공/실패 둘 다 캐시한다. 매 메시지마다 파일을 뒤지지 않기 위해서다.
+ */
+var configCache = null;
+var configError = null;
+
+function getConfig() {
+  if (configCache) return configCache;
+  if (configError) return null;
+
+  const tried = [];
+  for (let i = 0; i < CONFIG_PATHS.length; i++) {
     try {
-      const data = FileStream.read(paths[i]);
-      if (data) return JSON.parse(data);
+      const data = FileStream.read(CONFIG_PATHS[i]);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (!parsed.serverUrl) {
+          configError = "config.json에 serverUrl이 없습니다.";
+          return null;
+        }
+        if (!parsed.botToken) {
+          configError = "config.json에 botToken이 없습니다.";
+          return null;
+        }
+        parsed.timeout = parsed.timeout || 5000;
+        configCache = parsed;
+        return configCache;
+      }
+      tried.push(CONFIG_PATHS[i] + " (빈 파일)");
     } catch (e) {
-      // 다음 경로 시도
+      tried.push(CONFIG_PATHS[i] + " (" + e.message + ")");
     }
   }
-  throw new Error("config.json을 찾을 수 없습니다. config.json.example을 복사해서 만드세요.");
-}
 
-const CONFIG = loadConfig();
-const SERVER_URL = CONFIG.serverUrl;
-const BOT_TOKEN = CONFIG.botToken;
-const TIMEOUT = CONFIG.timeout || 5000;
+  configError = "config.json을 못 읽었습니다.\n" + tried.join("\n");
+  return null;
+}
 
 // ============================================================
 // HTTP
@@ -55,8 +82,11 @@ const TIMEOUT = CONFIG.timeout || 5000;
  * 예외를 던지지 않는 이유는 호출부마다 try/catch를 두지 않기 위해서다.
  */
 function apiGet(path, params) {
+  const cfg = getConfig();
+  if (!cfg) return { error: configError };
+
   try {
-    let url = SERVER_URL + path;
+    let url = cfg.serverUrl + path;
 
     const parts = [];
     // for-in 헤드에는 var를 쓴다. Rhino가 여기서 const를 못 받아 신택스 에러를 낸다.
@@ -68,9 +98,9 @@ function apiGet(path, params) {
 
     const conn = new java.net.URL(url).openConnection();
     conn.setRequestMethod("GET");
-    conn.setConnectTimeout(TIMEOUT);
-    conn.setReadTimeout(TIMEOUT);
-    conn.setRequestProperty("Authorization", "Bearer " + BOT_TOKEN);
+    conn.setConnectTimeout(cfg.timeout);
+    conn.setReadTimeout(cfg.timeout);
+    conn.setRequestProperty("Authorization", "Bearer " + cfg.botToken);
 
     // getResponseCode()는 Java int를 준다. Rhino에서 === 비교가 보장되지 않으므로
     // JS 숫자로 못박는다 — 레퍼런스 봇이 상태코드에 >= 와 < 만 쓴 이유로 보인다.
@@ -200,6 +230,7 @@ function helpText() {
     " !회비 <이름>      회원·회비·게스트비\n" +
     " !게스트비 <이름>  게스트비만\n" +
     " !미납            전체 미납자\n" +
+    " !핑              봇·설정 상태 확인\n" +
     "\n예: !회비 원동현"
   );
 }
@@ -248,6 +279,31 @@ function handleGuest(params) {
   return formatGuestMany(r.matches, r.query);
 }
 
+/**
+ * 살아있는지만 본다. **네트워크를 타지 않는다** — 이게 요점이다.
+ *
+ * 반응이 없을 때 원인은 두 갈래다: 메신저봇R이 메시지를 아예 못 받고 있거나
+ * (봇 OFF, 알림 접근 권한, 봇 계정이 그 방에 없음), 스크립트는 도는데 설정·네트워크에서
+ * 막히거나. !핑이 답하면 위쪽은 정상이라는 뜻이므로 아래쪽만 보면 된다.
+ */
+function handlePing() {
+  const cfg = getConfig();
+  if (!cfg) return "봇 살아있음 ✅\n설정 실패 ❌\n" + configError;
+
+  const token = String(cfg.botToken);
+  let masked = "(너무 짧음)";
+  if (token.length > 8) {
+    masked = token.substring(0, 4) + "..." + token.substring(token.length - 4);
+  }
+
+  return (
+    "봇 살아있음 ✅\n" +
+    "설정 읽음 ✅\n" +
+    "서버 " + cfg.serverUrl + "\n" +
+    "토큰 " + masked
+  );
+}
+
 function handleUnpaid() {
   const res = apiGet("/api/bot/unpaid", {});
   if (res.error) return res.error;
@@ -265,6 +321,10 @@ function handleCommand(command, params) {
     case "미납":
       return handleUnpaid();
 
+    case "핑":
+    case "ping":
+      return handlePing();
+
     case "도움말":
     case "도움":
       return helpText();
@@ -281,6 +341,20 @@ function handleCommand(command, params) {
 // ============================================================
 
 function response(room, msg, sender, isGroupChat, replier, imageDB, packageName) {
+  // **필터보다 먼저 찍는다.** 봇이 반응이 없을 때 원인이 "메시지가 안 온다"인지
+  // "와서 걸러진다"인지 이 한 줄이 가른다. 로그가 비어 있으면 메신저봇R이 메시지를
+  // 못 받고 있는 것이므로 스크립트를 아무리 고쳐도 소용없다.
+  //
+  // 본문은 안 찍는다 — 단톡방 대화 전체가 태블릿 로그에 쌓이면 곤란하다.
+  // 전체를 보려면 config.json에 "debug": true 를 넣는다.
+  try {
+    Log.d("[" + scriptName + "] recv room=" + room + " len=" + (msg ? msg.length : 0));
+    const dbg = configCache && configCache.debug;
+    if (dbg) Log.d("[" + scriptName + "] msg=" + msg + " sender=" + sender + " group=" + isGroupChat);
+  } catch (e) {
+    // 로그가 실패해도 본 흐름은 계속한다
+  }
+
   if (!msg || msg.charAt(0) !== "!") return;
 
   const parts = msg.trim().split(/\s+/);
@@ -288,10 +362,16 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
   const params = parts.slice(1);
 
   try {
+    Log.d("[" + scriptName + "] cmd=" + command);
     const reply = handleCommand(command, params);
-    if (reply) replier.reply(reply);
+    if (reply) {
+      replier.reply(reply);
+      Log.d("[" + scriptName + "] replied " + reply.length + " chars");
+    } else {
+      Log.d("[" + scriptName + "] no handler for '" + command + "'");
+    }
   } catch (e) {
-    Log.e("[" + scriptName + "] " + e.message);
+    Log.e("[" + scriptName + "] " + e + " @ " + (e.lineNumber || "?"));
     replier.reply("오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
   }
 }
