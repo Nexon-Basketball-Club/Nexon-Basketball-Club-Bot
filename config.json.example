@@ -1,5 +1,5 @@
 {
-  "serverUrl": "https://nexon-basketball-club.up.railway.app",
-  "botToken": "여기에-서버-BOT_TOKEN과-같은-값",
+  "serverUrl": "https://<railway-배포-주소>",
+  "botToken": "<서버 환경변수 BOT_TOKEN과 같은 값>",
   "timeout": 5000
 }
