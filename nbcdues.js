@@ -54,6 +54,40 @@ const CONFIG_PATHS = [
 var configCache = null;
 var configError = null;
 
+/**
+ * serverUrl을 다듬고 검증한다. 실패하면 configError를 채우고 null.
+ *
+ * 실제로 https://를 두 번 적어서 반나절을 날렸다. 그러면 java.net.URL이 호스트를
+ * 문자열 "https"로 읽고 `Unable to resolve host "https"`가 난다 — 에러만 봐서는
+ * 원인이 config 오타라는 걸 알 수가 없다. 그래서 여기서 미리 잡고 무엇이 잘못됐는지
+ * 대놓고 말해준다.
+ */
+function normalizeServerUrl(raw) {
+  let url = raw.replace(/^\s+|\s+$/g, "");
+
+  // https://https://... 처럼 스킴이 겹친 경우
+  const dup = /^(https?:\/\/)(https?:\/\/)/.exec(url);
+  if (dup) {
+    configError = "config.json의 serverUrl에 https:// 가 두 번 있습니다.\n" + url;
+    return null;
+  }
+
+  if (!/^https?:\/\//.test(url)) {
+    configError = "config.json의 serverUrl은 https:// 로 시작해야 합니다.\n" + url;
+    return null;
+  }
+
+  // 자리표시자를 그대로 둔 경우
+  if (url.indexOf("<") >= 0 || url.indexOf(">") >= 0) {
+    configError = "config.json의 serverUrl이 예시 그대로입니다.\n" + url;
+    return null;
+  }
+
+  // 끝 슬래시를 떼어 //api/... 가 되는 걸 막는다
+  url = url.replace(/\/+$/, "");
+  return url;
+}
+
 function getConfig() {
   if (configCache) return configCache;
   if (configError) return null;
@@ -72,7 +106,14 @@ function getConfig() {
           configError = "config.json에 botToken이 없습니다.";
           return null;
         }
-        parsed.timeout = parsed.timeout || 5000;
+
+        const url = normalizeServerUrl(String(parsed.serverUrl));
+        if (!url) return null; // normalize가 configError를 채운다
+        parsed.serverUrl = url;
+
+        // Railway는 유휴 상태에서 깨어나는 데 몇 초 걸린다. 5초는 짧아서
+        // 첫 요청이 타임아웃으로 떨어졌다.
+        parsed.timeout = parsed.timeout || 15000;
         configCache = parsed;
         return configCache;
       }
@@ -108,9 +149,13 @@ function apiGet(path, params) {
       parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(params[key])));
     }
     if (parts.length > 0) url = url + "?" + parts.join("&");
+    Log.i("[" + scriptName + "] GET " + url);
 
     const conn = new java.net.URL(url).openConnection();
     conn.setRequestMethod("GET");
+    // Railway는 http로 들어오면 https로 리다이렉트한다. Java의 HttpURLConnection은
+    // 프로토콜이 바뀌는 리다이렉트를 따라가지 않으므로 serverUrl은 https여야 한다.
+    conn.setInstanceFollowRedirects(true);
     conn.setConnectTimeout(cfg.timeout);
     conn.setReadTimeout(cfg.timeout);
     conn.setRequestProperty("Authorization", "Bearer " + cfg.botToken);
@@ -139,8 +184,12 @@ function apiGet(path, params) {
 
     return body;
   } catch (e) {
-    Log.e("[" + scriptName + "] " + e.message);
-    return { error: "서버가 응답하지 않습니다." };
+    // **예외 내용을 채팅에도 낸다.** 로그에만 찍으면 태블릿을 들여다봐야 원인을 알 수
+    // 있는데, 이 봇은 원래 태블릿을 안 만지려고 만든 것이다. 주소·타임아웃·인증서 중
+    // 무엇인지가 이 한 줄에 다 들어있다. 토큰은 헤더에만 있으므로 새지 않는다.
+    const detail = e && e.message ? e.message : String(e);
+    Log.e("[" + scriptName + "] " + detail);
+    return { error: "서버에 연결하지 못했습니다.\n" + detail };
   }
 }
 
