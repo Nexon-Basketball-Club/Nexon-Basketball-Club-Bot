@@ -27,7 +27,7 @@ function loadConfig() {
     "/storage/emulated/0/msgbot/Bots/nbcdues/config.json",
     "/sdcard/msgbot/Bots/nbcdues/config.json",
     "Bots/config.json",
-    "config.json",
+    "config.json"
   ];
 
   for (let i = 0; i < paths.length; i++) {
@@ -59,7 +59,8 @@ function apiGet(path, params) {
     let url = SERVER_URL + path;
 
     const parts = [];
-    for (const key in params) {
+    // for-in 헤드에는 var를 쓴다. Rhino가 여기서 const를 못 받아 신택스 에러를 낸다.
+    for (var key in params) {
       if (params[key] === null || params[key] === undefined) continue;
       parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(params[key])));
     }
@@ -71,7 +72,9 @@ function apiGet(path, params) {
     conn.setReadTimeout(TIMEOUT);
     conn.setRequestProperty("Authorization", "Bearer " + BOT_TOKEN);
 
-    const status = conn.getResponseCode();
+    // getResponseCode()는 Java int를 준다. Rhino에서 === 비교가 보장되지 않으므로
+    // JS 숫자로 못박는다 — 레퍼런스 봇이 상태코드에 >= 와 < 만 쓴 이유로 보인다.
+    const status = Number(conn.getResponseCode());
     const stream = status >= 200 && status < 300 ? conn.getInputStream() : conn.getErrorStream();
 
     if (!stream) {
@@ -209,47 +212,58 @@ function notFound(query) {
 // 명령어
 // ============================================================
 
-/** 이름으로 조회하는 두 명령어의 공통 흐름. formatter만 갈아끼운다. */
-function lookupAndFormat(params, formatOne, formatMany) {
-  if (params.length === 0) return helpText();
-
+/**
+ * 이름 조회 공통부. 두 명령어가 같은 엔드포인트를 쓰므로 여기까지만 묶고,
+ * 포맷은 각 핸들러가 직접 고른다.
+ *
+ * 고차 함수(formatter를 인자로 넘기기)로 더 줄일 수 있지만 그러지 않았다 —
+ * 여러 줄 호출이 생기고 거기 붙는 후행 쉼표가 Rhino에서 신택스 에러를 낸다.
+ * 이 파일은 고칠 때마다 태블릿을 만져야 하므로 평평한 쪽이 싸다.
+ */
+function lookupPerson(params) {
   // 이름에 공백이 있을 수 있으므로 나머지 인자를 전부 붙인다
   const query = params.join(" ");
   const res = apiGet("/api/bot/person", { name: query });
 
+  if (res.error) return { message: res.error };
+  if (!res.matches || res.matches.length === 0) return { message: notFound(query) };
+  return { query: query, quarter: res.quarter, matches: res.matches };
+}
+
+function handleDues(params) {
+  if (params.length === 0) return helpText();
+
+  const r = lookupPerson(params);
+  if (r.message) return r.message;
+  if (r.matches.length === 1) return formatDuesOne(r.matches[0], r.quarter);
+  return formatDuesMany(r.matches, r.query, r.quarter);
+}
+
+function handleGuest(params) {
+  if (params.length === 0) return helpText();
+
+  const r = lookupPerson(params);
+  if (r.message) return r.message;
+  if (r.matches.length === 1) return formatGuestOne(r.matches[0]);
+  return formatGuestMany(r.matches, r.query);
+}
+
+function handleUnpaid() {
+  const res = apiGet("/api/bot/unpaid", {});
   if (res.error) return res.error;
-  if (!res.matches || res.matches.length === 0) return notFound(query);
-  if (res.matches.length === 1) return formatOne(res.matches[0], res.quarter);
-  return formatMany(res.matches, query, res.quarter);
+  return formatUnpaid(res);
 }
 
 function handleCommand(command, params) {
   switch (command) {
     case "회비":
-      return lookupAndFormat(
-        params,
-        function (m, quarter) {
-          return formatDuesOne(m, quarter);
-        },
-        formatDuesMany,
-      );
+      return handleDues(params);
 
     case "게스트비":
-      return lookupAndFormat(
-        params,
-        function (m) {
-          return formatGuestOne(m);
-        },
-        function (matches, query) {
-          return formatGuestMany(matches, query);
-        },
-      );
+      return handleGuest(params);
 
-    case "미납": {
-      const res = apiGet("/api/bot/unpaid", {});
-      if (res.error) return res.error;
-      return formatUnpaid(res);
-    }
+    case "미납":
+      return handleUnpaid();
 
     case "도움말":
     case "도움":
