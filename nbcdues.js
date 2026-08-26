@@ -388,3 +388,27 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
     replier.reply("오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
   }
 }
+
+// ============================================================
+// 액티비티 라이프사이클
+// ============================================================
+//
+// 봇 설정 화면용 콜백이고 메시지 처리와는 무관하다. 그래도 두는 이유는, 메신저봇R이
+// 봇을 새로 만들 때 넣어주는 기본 템플릿에 이것들이 들어있기 때문이다. 동작하는
+// 봇(nbcbot)에는 있고 이 파일에만 없는 차이였고, 없어서 문제가 되는지 확인할 방법이
+// 없어 그냥 맞췄다. 비용이 0이다.
+
+function onCreate(savedInstanceState, activity) {
+  const view = new android.widget.TextView(activity);
+  view.setText("NBC 회비 봇\n\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
+  view.setTextColor(android.graphics.Color.DKGRAY);
+  activity.setContentView(view);
+}
+
+function onStart(activity) {}
+
+function onResume(activity) {}
+
+function onPause(activity) {}
+
+function onStop(activity) {}
