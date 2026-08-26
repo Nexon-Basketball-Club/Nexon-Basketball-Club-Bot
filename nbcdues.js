@@ -361,9 +361,9 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
   // 본문은 안 찍는다 — 단톡방 대화 전체가 태블릿 로그에 쌓이면 곤란하다.
   // 전체를 보려면 config.json에 "debug": true 를 넣는다.
   try {
-    Log.d("[" + scriptName + "] recv room=" + room + " len=" + (msg ? msg.length : 0));
+    Log.i("[" + scriptName + "] recv room=" + room + " len=" + (msg ? msg.length : 0));
     const dbg = configCache && configCache.debug;
-    if (dbg) Log.d("[" + scriptName + "] msg=" + msg + " sender=" + sender + " group=" + isGroupChat);
+    if (dbg) Log.i("[" + scriptName + "] msg=" + msg + " sender=" + sender + " group=" + isGroupChat);
   } catch (e) {
     // 로그가 실패해도 본 흐름은 계속한다
   }
@@ -375,13 +375,13 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
   const params = parts.slice(1);
 
   try {
-    Log.d("[" + scriptName + "] cmd=" + command);
+    Log.i("[" + scriptName + "] cmd=" + command);
     const reply = handleCommand(command, params);
     if (reply) {
       replier.reply(reply);
-      Log.d("[" + scriptName + "] replied " + reply.length + " chars");
+      Log.i("[" + scriptName + "] replied " + reply.length + " chars");
     } else {
-      Log.d("[" + scriptName + "] no handler for '" + command + "'");
+      Log.i("[" + scriptName + "] no handler for '" + command + "'");
     }
   } catch (e) {
     Log.e("[" + scriptName + "] " + e + " @ " + (e.lineNumber || "?"));
