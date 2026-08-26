@@ -68,18 +68,18 @@ function normalizeServerUrl(raw) {
   // https://https://... 처럼 스킴이 겹친 경우
   const dup = /^(https?:\/\/)(https?:\/\/)/.exec(url);
   if (dup) {
-    configError = "config.json의 serverUrl에 https:// 가 두 번 있습니다.\n" + url;
+    configError = "config.json의 serverUrl에 https:// 가 두 번 있습니다.";
     return null;
   }
 
   if (!/^https?:\/\//.test(url)) {
-    configError = "config.json의 serverUrl은 https:// 로 시작해야 합니다.\n" + url;
+    configError = "config.json의 serverUrl은 https:// 로 시작해야 합니다.";
     return null;
   }
 
   // 자리표시자를 그대로 둔 경우
   if (url.indexOf("<") >= 0 || url.indexOf(">") >= 0) {
-    configError = "config.json의 serverUrl이 예시 그대로입니다.\n" + url;
+    configError = "config.json의 serverUrl이 예시 그대로입니다.";
     return null;
   }
 
@@ -132,12 +132,18 @@ function getConfig() {
 // ============================================================
 
 /**
- * 서버 GET 호출. 성공하면 파싱된 객체, 실패하면 { error: "..." } 를 돌려준다.
+ * 서버 GET 호출. 성공하면 파싱된 객체, 실패하면 { error, kind } 를 돌려준다.
  * 예외를 던지지 않는 이유는 호출부마다 try/catch를 두지 않기 위해서다.
+ *
+ * `kind`로 실패 종류를 가른다 — config / auth / server / network. !핑이 이걸로
+ * "서버가 죽었다"와 "토큰이 틀렸다"를 구분해서 말한다.
+ *
+ * **자세한 내용은 로그에만 남긴다.** 주소나 예외 원문이 단톡방에 뜨면 곤란하다.
+ * 태블릿 로그에는 전부 남으므로 진단에는 지장이 없다.
  */
 function apiGet(path, params) {
   const cfg = getConfig();
-  if (!cfg) return { error: configError };
+  if (!cfg) return { error: configError, kind: "config" };
 
   try {
     let url = cfg.serverUrl + path;
@@ -167,7 +173,7 @@ function apiGet(path, params) {
 
     if (!stream) {
       conn.disconnect();
-      return { error: "서버 응답을 읽을 수 없습니다. (" + status + ")" };
+      return { error: "서버 응답을 읽을 수 없습니다.", kind: "server" };
     }
 
     const reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream, "UTF-8"));
@@ -179,17 +185,16 @@ function apiGet(path, params) {
 
     const body = JSON.parse(sb.toString());
 
-    if (status === 401) return { error: "봇 인증에 실패했습니다. 토큰을 확인해 주세요." };
-    if (status >= 400) return { error: body.error || "서버 오류 (" + status + ")" };
+    if (status === 401) return { error: "토큰이 맞지 않습니다.", kind: "auth" };
+    if (status >= 400) return { error: body.error || "서버 오류", kind: "server" };
 
     return body;
   } catch (e) {
-    // **예외 내용을 채팅에도 낸다.** 로그에만 찍으면 태블릿을 들여다봐야 원인을 알 수
-    // 있는데, 이 봇은 원래 태블릿을 안 만지려고 만든 것이다. 주소·타임아웃·인증서 중
-    // 무엇인지가 이 한 줄에 다 들어있다. 토큰은 헤더에만 있으므로 새지 않는다.
+    // 예외 원문에는 주소가 들어있다 — Unable to resolve host "...". 단톡방엔 종류만
+    // 내고 원문은 로그로 넘긴다. 태블릿 로그에 다 남으므로 진단에는 지장이 없다.
     const detail = e && e.message ? e.message : String(e);
     Log.e("[" + scriptName + "] " + detail);
-    return { error: "서버에 연결하지 못했습니다.\n" + detail };
+    return { error: "서버에 연결하지 못했습니다.", kind: "network" };
   }
 }
 
@@ -292,7 +297,7 @@ function helpText() {
     " !회비 <이름>      회원·회비·게스트비\n" +
     " !게스트비 <이름>  게스트비만\n" +
     " !미납            전체 미납자\n" +
-    " !핑              봇·설정 상태 확인\n" +
+    " !핑              서버·토큰 상태 확인\n" +
     "\n예: !회비 원동현"
   );
 }
@@ -350,20 +355,20 @@ function handleGuest(params) {
  */
 function handlePing() {
   const cfg = getConfig();
-  if (!cfg) return "봇 살아있음 ✅\n설정 실패 ❌\n" + configError;
+  if (!cfg) return "봇 ✅\n설정 ❌\n" + configError;
 
-  const token = String(cfg.botToken);
-  let masked = "(너무 짧음)";
-  if (token.length > 8) {
-    masked = token.substring(0, 4) + "..." + token.substring(token.length - 4);
-  }
+  // 조회 라우트 대신 전용 health를 친다. !회비로 확인하면 토큰 문제인지 DB 문제인지
+  // 이름을 못 찾은 건지 섞여서 구분이 안 된다.
+  const res = apiGet("/api/bot/health", {});
 
-  return (
-    "봇 살아있음 ✅\n" +
-    "설정 읽음 ✅\n" +
-    "서버 " + cfg.serverUrl + "\n" +
-    "토큰 " + masked
-  );
+  if (res.kind === "auth") return "봇 ✅\n설정 ✅\n서버 ✅\n토큰 ❌ — 서버와 값이 다릅니다";
+  if (res.kind === "network") return "봇 ✅\n설정 ✅\n서버 ❌ — 연결되지 않습니다";
+  if (res.error) return "봇 ✅\n설정 ✅\n서버 ⚠️ — " + res.error;
+
+  // 서버는 살아있는데 DB만 죽은 경우를 가른다. 그래야 "서버 정상인데 조회가 안 된다"를
+  // 설명할 수 있다.
+  const dbLine = res.db ? "DB ✅" : "DB ❌ — 서버는 살아있으나 조회 불가";
+  return "봇 ✅\n설정 ✅\n서버 ✅\n토큰 ✅\n" + dbLine;
 }
 
 function handleUnpaid() {
