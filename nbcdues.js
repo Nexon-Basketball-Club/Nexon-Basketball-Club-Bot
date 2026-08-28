@@ -277,7 +277,14 @@ function formatGuestMany(matches, query) {
   return "'" + query + "' " + matches.length + "명\n\n" + blocks.join("\n\n");
 }
 
-/** 미납자 명단. 자르지 않고 전원 낸다 — 잘리면 자기가 미납인 걸 모르는 사람이 생긴다. */
+/**
+ * 미납자 명단. 자르지 않고 전원 낸다 — 잘리면 자기가 미납인 걸 모르는 사람이 생긴다.
+ *
+ * **회원번호를 같이 낸다.** 이름만 찍었더니 서로 다른 두 사람이 같은 이름으로 나간 적이
+ * 있는데(서버의 조인 버그), 단톡방에서는 그게 그냥 "같은 사람이 두 줄"로 보여 아무도
+ * 이상하다고 못 느꼈다. 동명이인을 가르는 데도 이게 유일한 단서다 — !회비·!게스트비가
+ * 법인명으로 가르는 것과 같은 이유다.
+ */
 function formatUnpaid(data) {
   if (data.totalPeople === 0) return "게스트비 미납이 없습니다. 👏";
 
@@ -286,7 +293,7 @@ function formatUnpaid(data) {
 
   for (let i = 0; i < data.people.length; i++) {
     const p = data.people[i];
-    s += "\n" + p.name + "  " + p.count + "건  " + comma(p.amount);
+    s += "\n" + p.name + " (" + p.displayCode + ")  " + p.count + "건  " + comma(p.amount);
   }
   return s;
 }
