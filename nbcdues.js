@@ -14,9 +14,20 @@
  * - 서버는 JSON만 주고 문구는 여기서 만든다. 문구를 고치려면 태블릿에서 pull이 필요하다.
  *
  * Rhino 엔진(useBabel: false)이라 템플릿 리터럴을 쓰지 않는다. 문자열은 전부 + 로 잇는다.
+ *
+ * ## 선언은 전부 `var`다. 바꾸지 말 것.
+ *
+ * 메신저봇R은 `useBabel: false`라 Rhino가 이 소스를 그대로 먹는다. Rhino의 `const`는
+ * ES6 블록 스코프가 아니라 **함수 스코프 + 재할당 금지**여서, 루프 안에서
+ * `const p = arr[i]`를 반복하면 두 번째부터 대입이 먹지 않고 첫 값이 눌러앉는다.
+ *
+ * 이것 때문에 `!미납`이 미납자 두 명을 **같은 사람으로 두 줄** 냈다. 신택스 에러가
+ * 아니라 조용히 틀리기 때문에 서버를 한참 뒤졌다 — 서버 응답에는 두 사람이 멀쩡히
+ * 들어 있었다. 나열하는 함수가 전부(`formatDuesMany` / `formatGuestMany` /
+ * `formatUnpaid`) 같은 패턴이었으므로 동명이인 조회도 같이 틀리고 있었다.
  */
 
-const scriptName = "nbcdues";
+var scriptName = "nbcdues";
 
 /**
  * **로드 시점 로그.** 최상단이므로 스크립트가 앱에 올라가는 순간 찍힌다.
@@ -35,7 +46,7 @@ try {
 // 설정
 // ============================================================
 
-const CONFIG_PATHS = [
+var CONFIG_PATHS = [
   "/storage/emulated/0/msgbot/Bots/nbcdues/config.json",
   "/sdcard/msgbot/Bots/nbcdues/config.json",
   "Bots/config.json",
@@ -63,10 +74,10 @@ var configError = null;
  * 대놓고 말해준다.
  */
 function normalizeServerUrl(raw) {
-  let url = raw.replace(/^\s+|\s+$/g, "");
+  var url = raw.replace(/^\s+|\s+$/g, "");
 
   // https://https://... 처럼 스킴이 겹친 경우
-  const dup = /^(https?:\/\/)(https?:\/\/)/.exec(url);
+  var dup = /^(https?:\/\/)(https?:\/\/)/.exec(url);
   if (dup) {
     configError = "config.json의 serverUrl에 https:// 가 두 번 있습니다.";
     return null;
@@ -92,12 +103,12 @@ function getConfig() {
   if (configCache) return configCache;
   if (configError) return null;
 
-  const tried = [];
-  for (let i = 0; i < CONFIG_PATHS.length; i++) {
+  var tried = [];
+  for (var i = 0; i < CONFIG_PATHS.length; i++) {
     try {
-      const data = FileStream.read(CONFIG_PATHS[i]);
+      var data = FileStream.read(CONFIG_PATHS[i]);
       if (data) {
-        const parsed = JSON.parse(data);
+        var parsed = JSON.parse(data);
         if (!parsed.serverUrl) {
           configError = "config.json에 serverUrl이 없습니다.";
           return null;
@@ -107,7 +118,7 @@ function getConfig() {
           return null;
         }
 
-        const url = normalizeServerUrl(String(parsed.serverUrl));
+        var url = normalizeServerUrl(String(parsed.serverUrl));
         if (!url) return null; // normalize가 configError를 채운다
         parsed.serverUrl = url;
 
@@ -142,14 +153,14 @@ function getConfig() {
  * 태블릿 로그에는 전부 남으므로 진단에는 지장이 없다.
  */
 function apiGet(path, params) {
-  const cfg = getConfig();
+  var cfg = getConfig();
   if (!cfg) return { error: configError, kind: "config" };
 
   try {
-    let url = cfg.serverUrl + path;
+    var url = cfg.serverUrl + path;
 
-    const parts = [];
-    // for-in 헤드에는 var를 쓴다. Rhino가 여기서 const를 못 받아 신택스 에러를 낸다.
+    var parts = [];
+    // 이 파일은 선언을 전부 var로 통일한다 — 파일 머리말 참고.
     for (var key in params) {
       if (params[key] === null || params[key] === undefined) continue;
       parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(params[key])));
@@ -157,7 +168,7 @@ function apiGet(path, params) {
     if (parts.length > 0) url = url + "?" + parts.join("&");
     Log.i("[" + scriptName + "] GET " + url);
 
-    const conn = new java.net.URL(url).openConnection();
+    var conn = new java.net.URL(url).openConnection();
     conn.setRequestMethod("GET");
     // Railway는 http로 들어오면 https로 리다이렉트한다. Java의 HttpURLConnection은
     // 프로토콜이 바뀌는 리다이렉트를 따라가지 않으므로 serverUrl은 https여야 한다.
@@ -168,26 +179,26 @@ function apiGet(path, params) {
 
     // getResponseCode()는 Java int를 준다. Rhino에서 === 비교가 보장되지 않으므로
     // JS 숫자로 못박는다 — 레퍼런스 봇이 상태코드에 >= 와 < 만 쓴 이유로 보인다.
-    const status = Number(conn.getResponseCode());
-    const stream = status >= 200 && status < 300 ? conn.getInputStream() : conn.getErrorStream();
+    var status = Number(conn.getResponseCode());
+    var stream = status >= 200 && status < 300 ? conn.getInputStream() : conn.getErrorStream();
 
     if (!stream) {
       conn.disconnect();
       return { error: "서버 응답을 읽을 수 없습니다.", kind: "server" };
     }
 
-    const reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream, "UTF-8"));
-    const sb = new java.lang.StringBuilder();
-    let line;
+    var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream, "UTF-8"));
+    var sb = new java.lang.StringBuilder();
+    var line;
     while ((line = reader.readLine()) !== null) sb.append(line);
     reader.close();
     conn.disconnect();
 
-    const text = sb.toString();
+    var text = sb.toString();
     // 서버가 실제로 뭘 줬는지는 여기서만 볼 수 있다. **태블릿 로그에만** 남는다 —
     // 단톡방에는 안 나간다. 회원 이름과 금액이 들어있으므로 진단이 끝나면 지운다.
     Log.i("[" + scriptName + "] <= " + text);
-    const body = JSON.parse(text);
+    var body = JSON.parse(text);
 
     if (status === 401) return { error: "토큰이 맞지 않습니다.", kind: "auth" };
     if (status >= 400) return { error: body.error || "서버 오류", kind: "server" };
@@ -196,7 +207,7 @@ function apiGet(path, params) {
   } catch (e) {
     // 예외 원문에는 주소가 들어있다 — Unable to resolve host "...". 단톡방엔 종류만
     // 내고 원문은 로그로 넘긴다. 태블릿 로그에 다 남으므로 진단에는 지장이 없다.
-    const detail = e && e.message ? e.message : String(e);
+    var detail = e && e.message ? e.message : String(e);
     Log.e("[" + scriptName + "] " + detail);
     return { error: "서버에 연결하지 못했습니다.", kind: "network" };
   }
@@ -208,10 +219,10 @@ function apiGet(path, params) {
 
 /** 30000 → "30,000". Rhino의 toLocaleString을 믿지 않고 직접 찍는다. */
 function comma(n) {
-  const s = String(n);
-  let out = "";
-  let count = 0;
-  for (let i = s.length - 1; i >= 0; i--) {
+  var s = String(n);
+  var out = "";
+  var count = 0;
+  for (var i = s.length - 1; i >= 0; i--) {
     out = s.charAt(i) + out;
     count++;
     if (count % 3 === 0 && i > 0) out = "," + out;
@@ -232,7 +243,7 @@ function whichOne(m) {
 
 /** 한 명짜리 회비 응답 */
 function formatDuesOne(m, quarter) {
-  let s = m.name + " 님\n";
+  var s = m.name + " 님\n";
   s += quarter + " 회원 " + (m.isMember ? "✅" : "❌") + "\n";
   if (m.dues === "면제") s += "회비 면제\n";
   else if (m.dues) s += "회비 납부완료\n";
@@ -245,13 +256,13 @@ function formatDuesOne(m, quarter) {
  * 블록 사이는 빈 줄로 띄운다 — 카톡에서 줄만 이어지면 누구 것인지 안 읽힌다.
  */
 function formatDuesMany(matches, query, quarter) {
-  const marks = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨"];
-  const blocks = [];
+  var marks = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨"];
+  var blocks = [];
 
-  for (let i = 0; i < matches.length; i++) {
-    const m = matches[i];
-    const mark = i < marks.length ? marks[i] : String(i + 1) + ".";
-    let b = mark + " " + m.name + " (" + whichOne(m) + ")\n";
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i];
+    var mark = i < marks.length ? marks[i] : String(i + 1) + ".";
+    var b = mark + " " + m.name + " (" + whichOne(m) + ")\n";
     b += "   " + quarter + " 회원 " + (m.isMember ? "✅" : "❌");
     if (m.dues === "면제") b += " / 회비 면제";
     else if (m.dues) b += " / 회비 납부완료";
@@ -264,17 +275,17 @@ function formatDuesMany(matches, query, quarter) {
 
 /** 게스트비만 보는 응답 — 가장 오래된 미납일을 같이 낸다. */
 function formatGuestOne(m) {
-  let s = m.name + " 님\n";
+  var s = m.name + " 님\n";
   s += guestFeeLine(m);
   if (m.oldestUnpaid) s += "\n(가장 오래된 건 " + m.oldestUnpaid + ")";
   return s;
 }
 
 function formatGuestMany(matches, query) {
-  const blocks = [];
-  for (let i = 0; i < matches.length; i++) {
-    const m = matches[i];
-    let b = "· " + m.name + " (" + whichOne(m) + ")\n  " + guestFeeLine(m);
+  var blocks = [];
+  for (var i = 0; i < matches.length; i++) {
+    var m = matches[i];
+    var b = "· " + m.name + " (" + whichOne(m) + ")\n  " + guestFeeLine(m);
     if (m.oldestUnpaid) b += "\n  (가장 오래된 건 " + m.oldestUnpaid + ")";
     blocks.push(b);
   }
@@ -292,18 +303,18 @@ function formatUnpaid(data) {
   if (data.totalPeople === 0) return "게스트비 미납이 없습니다. 👏";
 
   // 이름별 등장 횟수. Rhino라 Map을 쓰지 않고 평범한 객체로 센다.
-  const seen = {};
-  for (let i = 0; i < data.people.length; i++) {
-    const n = data.people[i].name;
+  var seen = {};
+  for (var i = 0; i < data.people.length; i++) {
+    var n = data.people[i].name;
     seen[n] = (seen[n] || 0) + 1;
   }
 
-  let s = "게스트비 미납\n";
+  var s = "게스트비 미납\n";
   s += data.totalPeople + "명 · 총 " + comma(data.totalAmount) + "원\n";
 
-  for (let i = 0; i < data.people.length; i++) {
-    const p = data.people[i];
-    const label = seen[p.name] > 1 ? p.name + " (" + p.displayCode + ")" : p.name;
+  for (var i = 0; i < data.people.length; i++) {
+    var p = data.people[i];
+    var label = seen[p.name] > 1 ? p.name + " (" + p.displayCode + ")" : p.name;
     s += "\n" + label + "  " + p.count + "건  " + comma(p.amount);
   }
   return s;
@@ -338,8 +349,8 @@ function notFound(query) {
  */
 function lookupPerson(params) {
   // 이름에 공백이 있을 수 있으므로 나머지 인자를 전부 붙인다
-  const query = params.join(" ");
-  const res = apiGet("/api/bot/person", { name: query });
+  var query = params.join(" ");
+  var res = apiGet("/api/bot/person", { name: query });
 
   if (res.error) return { message: res.error };
   if (!res.matches || res.matches.length === 0) return { message: notFound(query) };
@@ -349,7 +360,7 @@ function lookupPerson(params) {
 function handleDues(params) {
   if (params.length === 0) return helpText();
 
-  const r = lookupPerson(params);
+  var r = lookupPerson(params);
   if (r.message) return r.message;
   if (r.matches.length === 1) return formatDuesOne(r.matches[0], r.quarter);
   return formatDuesMany(r.matches, r.query, r.quarter);
@@ -358,7 +369,7 @@ function handleDues(params) {
 function handleGuest(params) {
   if (params.length === 0) return helpText();
 
-  const r = lookupPerson(params);
+  var r = lookupPerson(params);
   if (r.message) return r.message;
   if (r.matches.length === 1) return formatGuestOne(r.matches[0]);
   return formatGuestMany(r.matches, r.query);
@@ -372,12 +383,12 @@ function handleGuest(params) {
  * 막히거나. !핑이 답하면 위쪽은 정상이라는 뜻이므로 아래쪽만 보면 된다.
  */
 function handlePing() {
-  const cfg = getConfig();
+  var cfg = getConfig();
   if (!cfg) return "봇 ✅\n설정 ❌\n" + configError;
 
   // 조회 라우트 대신 전용 health를 친다. !회비로 확인하면 토큰 문제인지 DB 문제인지
   // 이름을 못 찾은 건지 섞여서 구분이 안 된다.
-  const res = apiGet("/api/bot/health", {});
+  var res = apiGet("/api/bot/health", {});
 
   if (res.kind === "auth") return "봇 ✅\n설정 ✅\n서버 ✅\n토큰 ❌ — 서버와 값이 다릅니다";
   if (res.kind === "network") return "봇 ✅\n설정 ✅\n서버 ❌ — 연결되지 않습니다";
@@ -385,12 +396,12 @@ function handlePing() {
 
   // 서버는 살아있는데 DB만 죽은 경우를 가른다. 그래야 "서버 정상인데 조회가 안 된다"를
   // 설명할 수 있다.
-  const dbLine = res.db ? "DB ✅" : "DB ❌ — 서버는 살아있으나 조회 불가";
+  var dbLine = res.db ? "DB ✅" : "DB ❌ — 서버는 살아있으나 조회 불가";
   return "봇 ✅\n설정 ✅\n서버 ✅\n토큰 ✅\n" + dbLine;
 }
 
 function handleUnpaid() {
-  const res = apiGet("/api/bot/unpaid", {});
+  var res = apiGet("/api/bot/unpaid", {});
   if (res.error) return res.error;
   return formatUnpaid(res);
 }
@@ -434,7 +445,7 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
   // 전체를 보려면 config.json에 "debug": true 를 넣는다.
   try {
     Log.i("[" + scriptName + "] recv room=" + room + " len=" + (msg ? msg.length : 0));
-    const dbg = configCache && configCache.debug;
+    var dbg = configCache && configCache.debug;
     if (dbg) Log.i("[" + scriptName + "] msg=" + msg + " sender=" + sender + " group=" + isGroupChat);
   } catch (e) {
     // 로그가 실패해도 본 흐름은 계속한다
@@ -442,13 +453,13 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
 
   if (!msg || msg.charAt(0) !== "!") return;
 
-  const parts = msg.trim().split(/\s+/);
-  const command = parts[0].substring(1);
-  const params = parts.slice(1);
+  var parts = msg.trim().split(/\s+/);
+  var command = parts[0].substring(1);
+  var params = parts.slice(1);
 
   try {
     Log.i("[" + scriptName + "] cmd=" + command);
-    const reply = handleCommand(command, params);
+    var reply = handleCommand(command, params);
     if (reply) {
       replier.reply(reply);
       Log.i("[" + scriptName + "] replied " + reply.length + " chars");
@@ -471,7 +482,7 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
 // 없어 그냥 맞췄다. 비용이 0이다.
 
 function onCreate(savedInstanceState, activity) {
-  const view = new android.widget.TextView(activity);
+  var view = new android.widget.TextView(activity);
   view.setText("NBC 회비 봇\n\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
   view.setTextColor(android.graphics.Color.DKGRAY);
   activity.setContentView(view);
