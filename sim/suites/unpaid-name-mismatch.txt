@@ -1,0 +1,3 @@
+# 짝: npm run db:scenario unpaid-name-mismatch
+# const 버그가 살던 자리 — 미납자가 둘 이상일 때 각각 나오는지가 핵심이다.
+!미납

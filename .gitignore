@@ -7,7 +7,5 @@ sim/out/
 # 시뮬레이터용 로컬 설정 (토큰이 들어간다)
 sim/config.json
 
-# DB 상태에 의존하는 스냅샷은 커밋하지 않는다 — 명부 스냅샷과 시나리오가
-# 갖춰지면 그때 짝지어 커밋한다. basic은 서버·DB와 무관해서 예외다.
-sim/snapshots/*
-!sim/snapshots/basic.txt
+# 스냅샷은 전부 커밋한다. 시나리오가 명부 없이 자기 픽스처를 결정론적으로 만들므로
+# 누구든 `npm run db:scenario <이름>` 뒤에 같은 출력을 재현할 수 있다.

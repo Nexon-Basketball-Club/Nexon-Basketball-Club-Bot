@@ -1,0 +1,7 @@
+# 짝: npm run db:scenario same-name
+# formatDuesMany / formatGuestMany도 같은 const 버그를 갖고 있었다. 동명이인 셋의
+# 금액이 서로 달라서, 같은 줄이 세 번 나오면 그게 그 버그다.
+!미납
+!회비 김철수
+!게스트비 김철수
+!회비 박영희

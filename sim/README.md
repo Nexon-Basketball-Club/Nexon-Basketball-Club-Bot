@@ -85,9 +85,20 @@ $ ./sim/run.sh --script <const-version.js> '!미납'
 
 ## 스냅샷과 DB 상태
 
-`sim/snapshots/basic.txt`만 저장소에 있다. 서버·DB와 무관한 출력이라 언제 돌려도 같다.
+스냅샷은 전부 커밋한다. **suite 이름이 메인 저장소의 시나리오 이름과 같다.**
 
-`!미납`·`!회비 <이름>`처럼 **DB 상태에 의존하는 스냅샷은 커밋하지 않는다.** 그 출력은
-어떤 시나리오를 심었는지에 따라 달라지므로, 메인 저장소의 명부 스냅샷(`base.sql`)과
-시나리오가 갖춰진 뒤에 짝지어 만들어야 의미가 있다. 그전까지는 `--snapshot` 없이
-눈으로 보는 용도로 쓴다.
+| suite | 짝이 되는 시나리오 |
+|---|---|
+| `basic` | (없음 — 서버·DB 무관) |
+| `server` | (없음 — 서버만 떠 있으면 됨) |
+| `unpaid-name-mismatch` | `npm run db:scenario unpaid-name-mismatch` |
+| `same-name` | `npm run db:scenario same-name` |
+| `ui-volume` | `npm run db:scenario ui-volume` |
+
+시나리오는 명부 없이 자기 픽스처를 결정론적으로 만들기 때문에(`M-9` 대역) 누구든 같은
+출력을 재현한다. 전부 한 번에 돌리려면:
+
+```bash
+./sim/test.sh                                            # basic/server만
+./sim/test.sh --with-db /path/to/Nexon-Basketball-Club   # 시나리오를 심어가며 전부
+```
