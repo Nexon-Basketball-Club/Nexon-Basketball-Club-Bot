@@ -184,9 +184,9 @@ function apiGet(path, params) {
     conn.disconnect();
 
     const text = sb.toString();
-    // 서버가 실제로 뭘 줬는지는 여기서만 볼 수 있다. 단톡방엔 절대 안 내고
-    // config.json에 "debug": true 일 때만 태블릿 로그에 남긴다.
-    if (cfg.debug) Log.i("[" + scriptName + "] <= " + text);
+    // 서버가 실제로 뭘 줬는지는 여기서만 볼 수 있다. **태블릿 로그에만** 남는다 —
+    // 단톡방에는 안 나간다. 회원 이름과 금액이 들어있으므로 진단이 끝나면 지운다.
+    Log.i("[" + scriptName + "] <= " + text);
     const body = JSON.parse(text);
 
     if (status === 401) return { error: "토큰이 맞지 않습니다.", kind: "auth" };
