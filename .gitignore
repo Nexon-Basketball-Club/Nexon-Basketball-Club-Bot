@@ -1,2 +1,13 @@
 # 토큰이 들어있다. 절대 커밋하지 않는다 — 태블릿에 손으로 둔다.
 config.json
+
+# Rhino jar는 받아서 쓴다 (sim/fetch-rhino.sh)
+sim/lib/*.jar
+sim/out/
+# 시뮬레이터용 로컬 설정 (토큰이 들어간다)
+sim/config.json
+
+# DB 상태에 의존하는 스냅샷은 커밋하지 않는다 — 명부 스냅샷과 시나리오가
+# 갖춰지면 그때 짝지어 커밋한다. basic은 서버·DB와 무관해서 예외다.
+sim/snapshots/*
+!sim/snapshots/basic.txt
