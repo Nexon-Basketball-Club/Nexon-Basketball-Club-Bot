@@ -195,9 +195,8 @@ function apiGet(path, params) {
     conn.disconnect();
 
     var text = sb.toString();
-    // 서버가 실제로 뭘 줬는지는 여기서만 볼 수 있다. **태블릿 로그에만** 남는다 —
-    // 단톡방에는 안 나간다. 회원 이름과 금액이 들어있으므로 진단이 끝나면 지운다.
-    Log.i("[" + scriptName + "] <= " + text);
+    // 서버 응답 원문이 필요하면 여기서 text를 Log.i로 찍는다. 상시로는 안 남긴다 —
+    // 회원 이름과 금액이 태블릿 로그에 계속 쌓인다.
     var body = JSON.parse(text);
 
     if (status === 401) return { error: "토큰이 맞지 않습니다.", kind: "auth" };
