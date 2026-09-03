@@ -235,9 +235,39 @@ function guestFeeLine(m) {
   return "게스트비 미납 " + m.unpaidCount + "건 · " + comma(m.unpaidAmount) + "원";
 }
 
-/** 동명이인을 가르는 유일한 단서. 사원은 법인명, 나머지는 구분 라벨. */
+/** 동명이인을 가르는 1차 단서. 사원은 법인명, 나머지는 구분 라벨. */
 function whichOne(m) {
   return m.corporation ? m.corporation : m.kind;
+}
+
+/**
+ * 나열용 이름표. **`whichOne`까지 같은 사람이 둘 이상이면 회원번호를 붙인다.**
+ *
+ * 서버가 사내 명부의 동명이인 번호를 떼고 검색하게 되면서(`김지훈`으로 쳐도
+ * `김지훈13`이 같이 나온다) 한 조회에 여러 명이 걸리는 일이 잦아졌다. 대개는
+ * `김지훈13 ((주)넥슨코리아)` / `김지훈 (게스트)`처럼 갈리지만, 게스트 둘이 같이
+ * 걸리면 둘 다 `(게스트)`라 가릴 단서가 사라진다.
+ *
+ * `formatUnpaid`가 이미 쓰는 규칙을 그대로 가져왔다 — 평소엔 코드가 줄줄이 뜨는 게
+ * 지저분하고, 겹칠 때는 그것만이 두 사람을 가른다.
+ *
+ * Rhino라 Map을 쓰지 않고 평범한 객체로 센다.
+ */
+function nameTags(matches) {
+  var seen = {};
+  var i;
+  for (i = 0; i < matches.length; i++) {
+    var k = matches[i].name + "|" + whichOne(matches[i]);
+    seen[k] = (seen[k] || 0) + 1;
+  }
+  var tags = [];
+  for (i = 0; i < matches.length; i++) {
+    var m = matches[i];
+    var key = m.name + "|" + whichOne(m);
+    var inner = seen[key] > 1 ? whichOne(m) + " · " + m.displayCode : whichOne(m);
+    tags.push(m.name + " (" + inner + ")");
+  }
+  return tags;
 }
 
 /** 한 명짜리 회비 응답 */
@@ -257,11 +287,12 @@ function formatDuesOne(m, quarter) {
 function formatDuesMany(matches, query, quarter) {
   var marks = ["①", "②", "③", "④", "⑤", "⑥", "⑦", "⑧", "⑨"];
   var blocks = [];
+  var tags = nameTags(matches);
 
   for (var i = 0; i < matches.length; i++) {
     var m = matches[i];
     var mark = i < marks.length ? marks[i] : String(i + 1) + ".";
-    var b = mark + " " + m.name + " (" + whichOne(m) + ")\n";
+    var b = mark + " " + tags[i] + "\n";
     b += "   " + quarter + " 회원 " + (m.isMember ? "✅" : "❌");
     if (m.dues === "면제") b += " / 회비 면제";
     else if (m.dues) b += " / 회비 납부완료";
@@ -282,9 +313,10 @@ function formatGuestOne(m) {
 
 function formatGuestMany(matches, query) {
   var blocks = [];
+  var tags = nameTags(matches);
   for (var i = 0; i < matches.length; i++) {
     var m = matches[i];
-    var b = "· " + m.name + " (" + whichOne(m) + ")\n  " + guestFeeLine(m);
+    var b = "· " + tags[i] + "\n  " + guestFeeLine(m);
     if (m.oldestUnpaid) b += "\n  (가장 오래된 건 " + m.oldestUnpaid + ")";
     blocks.push(b);
   }
