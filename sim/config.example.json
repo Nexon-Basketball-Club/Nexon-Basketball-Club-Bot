@@ -2,5 +2,6 @@
   "serverUrl": "http://localhost:3000",
   "botToken": "local-dev-token",
   "timeout": 15000,
-  "debug": false
+  "debug": false,
+  "pollRoom": "테스트방"
 }

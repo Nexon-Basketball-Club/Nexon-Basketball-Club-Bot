@@ -153,6 +153,21 @@ function getConfig() {
  * 태블릿 로그에는 전부 남으므로 진단에는 지장이 없다.
  */
 function apiGet(path, params) {
+  return apiCall("GET", path, params, null);
+}
+
+/**
+ * POST/DELETE — 참석 신청과 취소가 쓴다.
+ *
+ * **이 봇이 처음으로 쓰는 요청이다.** decision 016은 읽기 전용으로 붙였고, 참석
+ * 투표(decision 025)가 그걸 개정했다. 토큰이 새면 이제 남의 참석을 넣고 지울 수
+ * 있으므로 config.json의 취급이 전보다 중요해졌다.
+ */
+function apiSend(method, path, body) {
+  return apiCall(method, path, null, body);
+}
+
+function apiCall(method, path, params, body) {
   var cfg = getConfig();
   if (!cfg) return { error: configError, kind: "config" };
 
@@ -166,16 +181,39 @@ function apiGet(path, params) {
       parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(params[key])));
     }
     if (parts.length > 0) url = url + "?" + parts.join("&");
-    Log.i("[" + scriptName + "] GET " + url);
+    Log.i("[" + scriptName + "] " + method + " " + url);
 
     var conn = new java.net.URL(url).openConnection();
-    conn.setRequestMethod("GET");
+    conn.setRequestMethod(method);
     // Railway는 http로 들어오면 https로 리다이렉트한다. Java의 HttpURLConnection은
     // 프로토콜이 바뀌는 리다이렉트를 따라가지 않으므로 serverUrl은 https여야 한다.
     conn.setInstanceFollowRedirects(true);
     conn.setConnectTimeout(cfg.timeout);
     conn.setReadTimeout(cfg.timeout);
     conn.setRequestProperty("Authorization", "Bearer " + cfg.botToken);
+
+    // 본문은 **UTF-8 바이트로 직접 쓴다.** 카톡 표시명이 한글이라 기본 인코딩에
+    // 맡기면 서버에 깨져서 저장되고, 그러면 취소가 자기 신청을 못 찾는다.
+    if (body) {
+      var payload = JSON.stringify(body);
+      conn.setDoOutput(true);
+      conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+      // **`conn.getOutputStream()`에 직접 쓰면 안 된다.** 그게 돌려주는 구체 클래스는
+      // `sun.net.www.http.PosterOutputStream`이고, `java.base`가 그 패키지를 export하지
+      // 않아 Rhino의 리플렉션이 `write`를 못 부른다:
+      //   IllegalAccessException: ... because module java.base does not export sun.net.www.http
+      // 그래서 **export된 public 클래스로 감싼다.** 입력 쪽이 이미 같은 이유로
+      // `InputStreamReader`를 거치고 있다.
+      //
+      // 이건 JVM 모듈 시스템의 제약이라 **안드로이드(Dalvik)에는 없다.** sim/run.sh에
+      // `--add-opens`를 한 줄 더 넣어도 풀린다. 그럼에도 코드 쪽을 고른 건 감싸는
+      // 비용이 0이고, 그래야 시뮬레이터가 **태블릿과 똑같은 코드 경로**를 돌기
+      // 때문이다 — 플래그로 풀면 sim에서만 되는 코드가 생길 여지가 남는다.
+      var out = new java.io.DataOutputStream(conn.getOutputStream());
+      out.write(new java.lang.String(payload).getBytes("UTF-8"));
+      out.flush();
+      out.close();
+    }
 
     // getResponseCode()는 Java int를 준다. Rhino에서 === 비교가 보장되지 않으므로
     // JS 숫자로 못박는다 — 레퍼런스 봇이 상태코드에 >= 와 < 만 쓴 이유로 보인다.
@@ -200,7 +238,10 @@ function apiGet(path, params) {
     var body = JSON.parse(text);
 
     if (status === 401) return { error: "토큰이 맞지 않습니다.", kind: "auth" };
-    if (status >= 400) return { error: body.error || "서버 오류", kind: "server" };
+    // **`code`를 같이 넘긴다.** 서버가 code를 내는 이유가 이것이다 — 호출부가 실패
+    // 이유를 문자열 매칭으로 알아내면 서버 문구를 고칠 때마다 봇이 조용히 틀린다.
+    if (status >= 400)
+      return { error: body.error || "서버 오류", kind: "server", code: body.code };
 
     return body;
   } catch (e) {
@@ -354,6 +395,8 @@ function formatUnpaid(data) {
 function helpText() {
   return (
     "사용법\n" +
+    " !참석            참석 신청 (선착순)\n" +
+    " !취소            참석 취소\n" +
     " !회비 <이름>      회원·회비·게스트비\n" +
     " !게스트비 <이름>  게스트비만\n" +
     " !미납            전체 미납자\n" +
@@ -413,6 +456,97 @@ function handleGuest(params) {
  * (봇 OFF, 알림 접근 권한, 봇 계정이 그 방에 없음), 스크립트는 도는데 설정·네트워크에서
  * 막히거나. !핑이 답하면 위쪽은 정상이라는 뜻이므로 아래쪽만 보면 된다.
  */
+/**
+ * 참석 신청 결과 한 줄.
+ *
+ * **정원과 대기 순번을 그 자리에서 말한다.** 명단은 웹에서 보게 했지만, 방금 신청한
+ * 사람이 알아야 할 건 "내가 들어갔나 / 몇 번째인가" 하나뿐이라 그건 여기서 끝낸다.
+ * 매 신청마다 링크를 붙이면 단톡방이 지저분해진다.
+ */
+function attendCount(r) {
+  if (r.capacity === null || r.capacity === undefined) return String(r.confirmedCount);
+  return r.confirmedCount + "/" + r.capacity;
+}
+
+function formatAttend(r) {
+  if (r.duplicate) {
+    if (r.confirmed) return "이미 신청하셨습니다 (" + r.optionLabel + " 확정 " + r.rank + "번)";
+    return "이미 신청하셨습니다 (대기 " + r.waitingRank + "번)";
+  }
+  if (r.confirmed) {
+    return r.voterName + " 님 " + r.optionLabel + " 확정 (" + attendCount(r) + ")";
+  }
+  return r.voterName + " 님 대기 " + r.waitingRank + "번 (" + attendCount(r) + " 마감)";
+}
+
+/**
+ * 취소 결과. **승계를 여기에 같이 싣는 게 요점이다.**
+ *
+ * 봇은 먼저 말을 걸 수 없다(알림 리플라이 토큰 방식). 그래서 "대기 1번이 확정됐습니다"를
+ * 알릴 수 있는 자리가 이 답장뿐이다 — 단톡방에 뜨므로 승계된 사람이 본다.
+ * 이 두 번째 줄을 빼면 대기자는 자기 차례가 온 걸 영영 모른다.
+ */
+function formatCancel(r) {
+  var text = r.voterName + " 님 취소되었습니다.";
+  if (r.promoted) {
+    text = text + "\n대기 1번 " + r.promoted.voterName + " 님이 " +
+      r.promoted.optionLabel + " 확정되었습니다. (" + attendCount(r) + ")";
+  }
+  return text;
+}
+
+/**
+ * 이 방에서 투표를 받아도 되나.
+ *
+ * **메신저봇R의 디버그 채팅방에서 `!참석`을 치면 진짜 투표에 들어간다.** 조회
+ * 명령어일 땐 무해했지만 쓰기라서 다르다. config.json의 `pollRoom`(문자열 또는 배열)에
+ * 적힌 방에서만 받는다. 안 적혀 있으면 아무 방에서나 받는다 — 설정을 강제하면
+ * 태블릿에서 config를 못 고치는 상황에 봇이 통째로 막힌다.
+ */
+function pollRoomAllowed(room) {
+  var cfg = getConfig();
+  if (!cfg || !cfg.pollRoom) return true;
+
+  var allowed = cfg.pollRoom;
+  if (typeof allowed === "string") return String(room) === allowed;
+
+  for (var i = 0; i < allowed.length; i++) {
+    if (String(room) === String(allowed[i])) return true;
+  }
+  return false;
+}
+
+/**
+ * `!참석` — 신청.
+ *
+ * **이름을 파라미터로 받지 않는다.** decision 016은 조회에서 이름을 항상 받게 했지만
+ * (표시명이 실명이 아니라서), 선착순 신청은 반대다 — `!참석 원동현`은 `!참석`보다
+ * 느리고, 선착순에서 타이핑 길이가 곧 순위다. 그리고 sender로만 넣고 sender로만
+ * 지우므로 "자기 것만 취소"가 규칙이 아니라 결과로 성립한다.
+ *
+ * 인자를 붙여도 **무시한다.** 기존 명령어 습관 때문에 `!참석 원동현`이 반드시 나오는데,
+ * 거절하면 그 사람만 선착순에서 뒤로 밀린다. 답장이 sender 이름을 말하므로 본인이 안다.
+ */
+function handleAttend(sender, room) {
+  if (!pollRoomAllowed(room)) return "이 방에서는 투표할 수 없습니다.";
+
+  var res = apiSend("POST", "/api/bot/poll", { voterName: String(sender) });
+  if (res.error) return res.error;
+  return formatAttend(res);
+}
+
+/** `!취소` — 취소. 마감 후에는 서버가 거부한다(명단 동결). */
+function handleCancel(sender, room) {
+  if (!pollRoomAllowed(room)) return "이 방에서는 투표할 수 없습니다.";
+
+  var res = apiSend("DELETE", "/api/bot/poll", { voterName: String(sender) });
+  if (res.error) {
+    if (res.code === "NOT_VOTED") return String(sender) + " 님은 신청 내역이 없습니다.";
+    return res.error;
+  }
+  return formatCancel(res);
+}
+
 function handlePing() {
   var cfg = getConfig();
   if (!cfg) return "봇 ✅\n설정 ❌\n" + configError;
@@ -437,13 +571,20 @@ function handleUnpaid() {
   return formatUnpaid(res);
 }
 
-function handleCommand(command, params) {
+// sender/room이 여기까지 내려오는 건 참석 투표 때문이다 — 조회 명령어는 안 쓴다.
+function handleCommand(command, params, sender, room) {
   switch (command) {
     case "회비":
       return handleDues(params);
 
     case "게스트비":
       return handleGuest(params);
+
+    case "참석":
+      return handleAttend(sender, room);
+
+    case "취소":
+      return handleCancel(sender, room);
 
     case "미납":
       return handleUnpaid();
@@ -490,7 +631,7 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
 
   try {
     Log.i("[" + scriptName + "] cmd=" + command);
-    var reply = handleCommand(command, params);
+    var reply = handleCommand(command, params, sender, room);
     if (reply) {
       replier.reply(reply);
       Log.i("[" + scriptName + "] replied " + reply.length + " chars");
@@ -514,7 +655,7 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
 
 function onCreate(savedInstanceState, activity) {
   var view = new android.widget.TextView(activity);
-  view.setText("NBC 회비 봇\n\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
+  view.setText("NBC 회비 봇\n\n!참석\n!취소\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
   view.setTextColor(android.graphics.Color.DKGRAY);
   activity.setContentView(view);
 }

@@ -2,5 +2,6 @@
   "serverUrl": "https://<railway-배포-주소>",
   "botToken": "<서버 환경변수 BOT_TOKEN과 같은 값>",
   "timeout": 5000,
-  "debug": false
+  "debug": false,
+  "pollRoom": "<참석 투표를 받을 단톡방 이름>"
 }
