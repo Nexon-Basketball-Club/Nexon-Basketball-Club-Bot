@@ -525,12 +525,24 @@ function formatAttend(r) {
 }
 
 /**
- * 취소 결과. **승계는 여기 싣지 않는다** — 서버가 메시지함에 쌓고 봇이 이 답장 바로 뒤에
- * 올린다(decision 032). 총무가 웹에서 지웠을 때와 같은 길·같은 문구다. 예전엔 봇이 먼저 말을
- * 걸 수 없다고 봐서 승계를 알릴 자리가 이 답장뿐이었다.
+ * 취소 결과 + **취소한 뒤의 인원**. 자리가 났는지가 취소 답장을 보는 사람들의 다음 질문이다.
+ *
+ * **승계는 여기 싣지 않는다** — 서버가 메시지함에 쌓고 봇이 이 답장 바로 뒤에 올린다(decision 032).
+ * 총무가 웹에서 지웠을 때와 같은 길·같은 문구다. 그래서 승계가 있었으면 인원은 승계 뒤의 것이다
+ * (`확정 12/12 · 정원 마감` → 바로 뒤에 "대기 1번 ○○ 님이 확정되었습니다"). 한 메시지로 합치는 안은
+ * 서버가 `!취소`의 승계를 메시지함에 안 쌓아야 해서 계약이 바뀌고(옛 봇은 승계를 못 알린다) 버려졌다.
  */
 function formatCancel(r) {
-  return r.voterName + " 님 취소되었습니다.";
+  return r.voterName + " 님 취소되었습니다.\n" + r.optionLabel + " " + cancelCount(r);
+}
+
+/** 인원 줄 — 서버 공지(`poll-announce.ts` `reminderCount`)와 같은 말을 쓴다. */
+function cancelCount(r) {
+  if (r.capacity === null || r.capacity === undefined) return "지금 " + r.confirmedCount + "명 신청";
+  var base = "확정 " + r.confirmedCount + "/" + r.capacity;
+  if (r.waitingCount > 0) return base + " · 대기 " + r.waitingCount + "명";
+  if (r.confirmedCount >= r.capacity) return base + " · 정원 마감";
+  return base + " · " + (r.capacity - r.confirmedCount) + "자리 남음";
 }
 
 /**
