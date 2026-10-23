@@ -41,6 +41,17 @@ npm run db:up && npm run db:scenario unpaid-name-mismatch && npm run dev
 스냅샷은 **정확 일치**로 본다. 문구를 고치면 깨지는데, 그때 `--update`를 주면 무엇이
 바뀌는지 diff를 보여주고 갱신한다. 의도한 변경인지 눈으로 확인하는 자리다.
 
+**단, 시계에 달린 값은 가리고 비교한다** (`Sim.mask`). 마감 시각 `10/23 (금) 15:17` →
+`M/D (요) HH:MM`, 남은 시간 `2시간 59분 남음` → `N 남음`, 분기 `2026 Q3 회원` → `YYYY Qn 회원`.
+시나리오를 심은 시각과 오늘 날짜에 따라 바뀌는 값이라 그대로 찍으면 다음 날 깨진다 — 실제로
+분기가 Q3→Q4로 넘어가자 아무것도 안 고친 `same-name`이 FAIL이 됐다. 형식은 남기므로 줄이
+사라지거나 모양이 바뀌면 여전히 잡힌다. 스냅샷 없이 화면에 찍을 때는 가리지 않는다.
+공지의 `마감 45분 전입니다`·`(다음 확인 10분 뒤)`는 시나리오가 고정한 값이라 가리지 않는다.
+
+**`@room <방>`** (CLI `--room`) — 스위트를 보낼 방. 기본은 `테스트방`(= 예시 config의 `pollRoom`).
+`basic`은 `@room 일반방`으로 보낸다: `!도움말`이 pollRoom에서는 투표가 있는지 서버에 묻는데,
+pollRoom이 아닌 방에서는 묻지 않으므로 DB에 무슨 투표가 있든 같은 출력이 나온다.
+
 ## 엔진 옵션
 
 ```bash
@@ -111,6 +122,9 @@ $ ./sim/run.sh --script <const-version.js> '!미납'
 | `unpaid-name-mismatch` | `npm run db:scenario unpaid-name-mismatch` |
 | `same-name` | `npm run db:scenario same-name` |
 | `ui-volume` | `npm run db:scenario ui-volume` |
+| `poll` | `npm run db:scenario poll-waitlist` (이름이 다르다) |
+| `poll-just-closed` | `npm run db:scenario poll-just-closed` |
+| `poll-options` | `npm run db:scenario poll-options` |
 | `notice-closed` | `npm run db:scenario poll-just-closed` — 마감 공지 (`poll-just-closed`보다 먼저) |
 | `notice-reminder` | `npm run db:scenario poll-closing-soon` — 마감 전 알림 |
 

@@ -23,12 +23,12 @@ if [ -n "$MAIN" ]; then
   # 이 루프 안에 있어야 결과가 결정론적이다.
   #
   # 공지 스위트도 같다 — 보낸 공지가 서버에 기록되므로 두 번째 실행은 아무것도 안 낸다.
-  for s in unpaid-name-mismatch same-name ui-volume poll-waitlist poll-just-closed poll-closing-soon; do
+  for s in unpaid-name-mismatch same-name ui-volume poll-waitlist poll-just-closed poll-closing-soon poll-options; do
     (cd "$MAIN" && npm run db:scenario "$s" >/dev/null 2>&1) || { echo "시나리오 실패: $s"; fail=1; continue; }
     # 투표 쪽은 스위트 이름과 시나리오 이름이 다르다.
     case "$s" in
       poll-waitlist)     run poll ;;
-      poll-just-closed)  run notice-closed ;;
+      poll-just-closed)  run notice-closed; run poll-just-closed ;;
       poll-closing-soon) run notice-reminder ;;
       *)                 run "$s" ;;
     esac

@@ -240,8 +240,9 @@ function apiCall(method, path, params, body) {
     if (status === 401) return { error: "토큰이 맞지 않습니다.", kind: "auth" };
     // **`code`를 같이 넘긴다.** 서버가 code를 내는 이유가 이것이다 — 호출부가 실패
     // 이유를 문자열 매칭으로 알아내면 서버 문구를 고칠 때마다 봇이 조용히 틀린다.
+    // `options`는 선택지를 못 골랐을 때 서버가 같이 주는 선택지 이름들이다.
     if (status >= 400)
-      return { error: body.error || "서버 오류", kind: "server", code: body.code };
+      return { error: body.error || "서버 오류", kind: "server", code: body.code, options: body.options };
 
     return body;
   } catch (e) {
@@ -392,10 +393,11 @@ function formatUnpaid(data) {
   return s;
 }
 
+/**
+ * 기본 도움말 — 서버 없이 나간다. 투표 줄은 `pollHelp`가 있을 때만 위에 붙인다.
+ * `!회비`/`!게스트비`를 이름 없이 쳤을 때도 이것만 낸다(그건 사용법 실수지 투표 얘기가 아니다).
+ */
 function helpText() {
-  // **`!참석`/`!취소`는 일부러 빼놨다.** 명령어는 살아 있고 동작한다 — 아직 회원들에게
-  // 열 준비가 안 돼서 목록에만 안 띄운다. 열 때 두 줄을 되살리고 sim/snapshots/basic.txt를
-  // 갱신하면 된다.
   return (
     "사용법\n" +
     " !회비 <이름>      회원·회비·게스트비\n" +
@@ -404,6 +406,31 @@ function helpText() {
     " !핑              서버·토큰 상태 확인\n" +
     "\n예: !회비 원동현"
   );
+}
+
+/**
+ * 도움말의 투표 줄. **투표가 있을 때만 붙인다** — 없을 때 `!참석`을 알려주면 `지금 진행 중인
+ * 투표가 없습니다`만 반복해서 보게 된다. 예전에 `!참석`/`!취소`를 도움말에서 아예 빼둔 이유가
+ * 그것이었고, 투표가 열려 있는지를 서버에 물으면 그 걱정 없이 띄울 수 있다.
+ *
+ * 마감 후 표시 기간에는 `!투표현황`만 남긴다. `/poll`이 마감 명단을 보여주는 동안이라 볼 것은
+ * 있지만, 신청·취소는 어차피 거절된다.
+ */
+function pollHelp(poll) {
+  if (!poll.open) return "투표 마감 · " + poll.title + "\n !투표현황        마감 명단\n";
+
+  var s = "투표 진행 중 · " + poll.title + "\n";
+  if (poll.options.length > 1) {
+    var labels = [];
+    for (var i = 0; i < poll.options.length; i++) labels.push(poll.options[i].label);
+    s += " !참석 <선택지>   선착순 신청 (" + labels.join(" / ") + ")\n";
+  } else {
+    s += " !참석            선착순 신청\n";
+  }
+  s += " !취소            신청 취소\n";
+  s += " !투표현황        명단\n";
+  s += " !내순번          내 순번\n";
+  return s;
 }
 
 function notFound(query) {
@@ -472,12 +499,13 @@ function attendCount(r) {
 function formatAttend(r) {
   if (r.duplicate) {
     if (r.confirmed) return "이미 신청하셨습니다 (" + r.optionLabel + " 확정 " + r.rank + "번)";
-    return "이미 신청하셨습니다 (대기 " + r.waitingRank + "번)";
+    return "이미 신청하셨습니다 (" + r.optionLabel + " 대기 " + r.waitingRank + "번)";
   }
   if (r.confirmed) {
     return r.voterName + " 님 " + r.optionLabel + " 확정 (" + attendCount(r) + ")";
   }
-  return r.voterName + " 님 대기 " + r.waitingRank + "번 (" + attendCount(r) + " 마감)";
+  // 대기에도 선택지를 붙인다. 선택지가 여럿이면 어느 줄에 섰는지가 답의 절반이다.
+  return r.voterName + " 님 " + r.optionLabel + " 대기 " + r.waitingRank + "번 (" + attendCount(r) + " 마감)";
 }
 
 /**
@@ -525,15 +553,106 @@ function pollRoomAllowed(room) {
  * 느리고, 선착순에서 타이핑 길이가 곧 순위다. 그리고 sender로만 넣고 sender로만
  * 지우므로 "자기 것만 취소"가 규칙이 아니라 결과로 성립한다.
  *
- * 인자를 붙여도 **무시한다.** 기존 명령어 습관 때문에 `!참석 원동현`이 반드시 나오는데,
- * 거절하면 그 사람만 선착순에서 뒤로 밀린다. 답장이 sender 이름을 말하므로 본인이 안다.
+ * 인자는 **선택지 이름으로만** 넘긴다. 선택지가 하나면 서버가 그걸 보지 않으므로 기존
+ * 명령어 습관인 `!참석 원동현`도 그냥 신청된다 — 거절하면 그 사람만 선착순에서 뒤로
+ * 밀린다. 선택지가 여럿일 때만 `!참석 1부`로 고르고, 못 고르면 칠 줄을 보여준다.
  */
-function handleAttend(sender, room) {
+function handleAttend(params, sender, room) {
   if (!pollRoomAllowed(room)) return "이 방에서는 투표할 수 없습니다.";
 
-  var res = apiSend("POST", "/api/bot/poll", { voterName: String(sender) });
-  if (res.error) return res.error;
+  var label = params.join(" ");
+  var res = apiSend("POST", "/api/bot/poll", { voterName: String(sender), optionLabel: label || null });
+  if (res.error) {
+    // 거절만 하면 무엇을 쳐야 하는지 모른다. 서버가 준 선택지로 그대로 칠 줄을 만든다.
+    if (res.options) return res.error + "\n" + optionCommands(res.options);
+    return res.error;
+  }
   return formatAttend(res);
+}
+
+function optionCommands(labels) {
+  var lines = [];
+  for (var i = 0; i < labels.length; i++) lines.push("!참석 " + labels[i]);
+  return lines.join("\n");
+}
+
+var NO_POLL = "지금 진행 중인 투표가 없습니다.";
+
+/**
+ * `!투표현황` — 명단 전부. 마감 공지(`formatClosedNotice`)와 같은 이유로 링크 대신 이름을
+ * 싣는다: 궁금한 건 "내가 들어갔나"이고, 표시명은 원래 그 방에 보이는 이름이다.
+ *
+ * 확정·대기 둘 다 **순번을 붙인다.** 진행 중에는 몇 번째인지가 곧 정보다 — 정원이 줄면
+ * 확정 뒤에서부터 밀린다.
+ */
+function formatPollStatus(poll) {
+  var single = poll.options.length === 1;
+  var when = "마감 " + poll.closesAtText + " · " + (poll.open ? poll.timeLeftText : "마감되었습니다");
+  var blocks = [poll.title + "\n" + when];
+
+  for (var i = 0; i < poll.options.length; i++) {
+    var o = poll.options[i];
+    var prefix = single ? "" : "[" + o.label + "] ";
+    var count = o.capacity === null ? String(o.confirmed.length) : o.confirmed.length + "/" + o.capacity;
+    var b = prefix + "확정 " + count;
+    if (o.confirmed.length > 0) b += "\n" + nameLines(o.confirmed, true);
+    blocks.push(b);
+    if (o.waiting.length > 0) {
+      blocks.push(prefix + "대기 " + o.waiting.length + "\n" + nameLines(o.waiting, true));
+    }
+  }
+  return blocks.join("\n\n");
+}
+
+/** 조회라 `pollRoom`을 보지 않는다 — 막은 이유가 디버그 방의 **쓰기**였다. */
+function handlePollStatus() {
+  var res = apiGet("/api/bot/poll", {});
+  if (res.error) return res.error;
+  if (!res.poll) return NO_POLL;
+  return formatPollStatus(res.poll);
+}
+
+/**
+ * `!내순번` — 내 자리만. **`!참석`으로 확인하면 안 되기 때문에 있다** — 신청 안 한 사람이
+ * 치면 그대로 신청된다. 정원이 줄어 확정에서 대기로 밀렸는지 확인하는 자리이기도 하다.
+ * 봇이 당사자에게 알릴 방법이 없어서, 그 통보는 총무가 붙이는 문구뿐이다(decision 027).
+ */
+function handleMyRank(sender) {
+  var res = apiGet("/api/bot/poll", { voterName: String(sender) });
+  if (res.error) return res.error;
+  if (!res.poll) return NO_POLL;
+
+  var me = res.me;
+  var text;
+  if (!me) text = String(sender) + " 님은 신청 내역이 없습니다.";
+  else if (me.confirmed)
+    text = String(sender) + " 님 " + me.optionLabel + " 확정 " + me.rank + "번 (" + attendCount(me) + ")";
+  else
+    text = String(sender) + " 님 " + me.optionLabel + " 대기 " + me.waitingRank + "번 (" + attendCount(me) + " 마감)";
+
+  if (!res.poll.open) text += "\n" + res.poll.title + " 투표는 마감되었습니다.";
+  return text;
+}
+
+/**
+ * `!도움말`. **투표 줄은 그때그때 서버에 물어서 붙인다** — 그래서 도움말이 네트워크를 탄다.
+ *
+ * 서버가 안 붙으면 투표 줄만 빼고 기본 도움말을 낸다. 도움말이 안 나오는 것보다 투표 줄이
+ * 빠지는 게 낫고, 원인은 `!핑`이 짚는다.
+ *
+ * `pollRoom`이 아닌 방에서는 묻지도 않는다. 거기서 `!참석`을 알려주면 "이 방에서는
+ * 투표할 수 없습니다"만 받는다.
+ */
+function handleHelp(room) {
+  if (!pollRoomAllowed(room)) return helpText();
+
+  var res = apiGet("/api/bot/poll", {});
+  if (res.error) {
+    Log.i("[" + scriptName + "] help: 투표 확인 실패, 기본 도움말만 — " + res.error);
+    return helpText();
+  }
+  if (!res.poll) return helpText();
+  return pollHelp(res.poll) + "\n" + helpText();
 }
 
 /** `!취소` — 취소. 마감 후에는 서버가 거부한다(명단 동결). */
@@ -783,10 +902,16 @@ function handleCommand(command, params, sender, room) {
       return handleGuest(params);
 
     case "참석":
-      return handleAttend(sender, room);
+      return handleAttend(params, sender, room);
 
     case "취소":
       return handleCancel(sender, room);
+
+    case "투표현황":
+      return handlePollStatus();
+
+    case "내순번":
+      return handleMyRank(sender);
 
     case "미납":
       return handleUnpaid();
@@ -797,7 +922,7 @@ function handleCommand(command, params, sender, room) {
 
     case "도움말":
     case "도움":
-      return helpText();
+      return handleHelp(room);
 
     default:
       // 모르는 명령어엔 침묵한다. 다른 봇이나 사람의 ! 로 시작하는 말에
@@ -879,7 +1004,7 @@ function onStartCompile() {
 
 function onCreate(savedInstanceState, activity) {
   var view = new android.widget.TextView(activity);
-  view.setText("NBC 회비 봇\n\n!참석\n!취소\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
+  view.setText("NBC 회비 봇\n\n!참석 [선택지]\n!취소\n!투표현황\n!내순번\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
   view.setTextColor(android.graphics.Color.DKGRAY);
   activity.setContentView(view);
 }

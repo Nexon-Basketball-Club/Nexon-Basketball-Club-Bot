@@ -28,6 +28,10 @@ import org.mozilla.javascript.Undefined;
  *   @persist  스크립트를 한 번만 로드하고 줄마다 이어 쓴다 (태블릿처럼). 공지처럼
  *             줄 사이에 상태가 이어져야 하는 스위트가 쓴다. CLI로는 --persist
  *   @tick     예약된 타이머를 지금 발화시킨다. 다음 예약 간격을 같이 찍는다
+ *   @room 방  이 스위트를 보낼 방. CLI로는 --room. `pollRoom`이 아닌 방에서 서버를 안 타는
+ *             응답(기본 도움말)을 고정할 때 쓴다
+ *
+ * 스냅샷과 비교할 때는 시계에 달린 값(마감 시각·남은 시간·분기)을 가린다 — `mask()`.
  */
 public class Sim {
 
@@ -162,6 +166,7 @@ public class Sim {
         String t = line.trim();
         if (t.isEmpty() || t.startsWith("#")) continue;
         if (t.equals("@persist")) { persist = true; continue; }
+        if (t.startsWith("@room ")) { room = t.substring(6).trim(); continue; }
         messages.add(t);
       }
     }
@@ -202,6 +207,7 @@ public class Sim {
       System.out.print(out);
       return;
     }
+    out = mask(out);
 
     Path snap = Paths.get(snapshot);
     if (update || !Files.exists(snap)) {
@@ -291,6 +297,24 @@ public class Sim {
     long sec = Math.round(ms / 1000);
     if (sec % 60 == 0) return (sec / 60) + "분";
     return sec + "초";
+  }
+
+  /**
+   * 스냅샷에 남길 때 **시계에 달린 값만** 가린다. 마감 시각·남은 시간은 시나리오를 심은 시각에,
+   * 분기는 오늘 날짜에 따라 바뀌어서 그대로 찍으면 다음 날(다음 분기) 깨진다. 실제로 분기가
+   * Q3→Q4로 넘어가며 same-name이 아무것도 안 고쳤는데 FAIL이 됐다.
+   *
+   * **형식은 남기고 값만 지운다.** 줄이 사라지거나 모양이 바뀌면 여전히 잡힌다. 화면에 찍을 때
+   * (스냅샷 없이)는 가리지 않는다.
+   *
+   * 공지 스위트가 확인하는 "마감 45분 전입니다"(서버가 준 남은 분)와 "(다음 확인 10분 뒤)"는
+   * 걸리지 않는다 — 시나리오가 고정한 값이라 가리면 확인할 게 없어진다. "3자리 남음"도 안 걸린다.
+   */
+  static String mask(String s) {
+    return s
+        .replaceAll("\\d{1,2}/\\d{1,2} \\([월화수목금토일]\\) \\d{2}:\\d{2}", "M/D (요) HH:MM")
+        .replaceAll("(\\d+일 \\d+시간|\\d+시간 \\d+분|\\d+분) 남음", "N 남음")
+        .replaceAll("\\d{4} Q[1-4] 회원", "YYYY Qn 회원");
   }
 
   /** 줄 단위로 첫 차이 지점을 보여준다. 스냅샷이 길어도 어디가 바뀌었는지 바로 보이게. */
