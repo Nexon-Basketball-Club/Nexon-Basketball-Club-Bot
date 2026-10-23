@@ -157,6 +157,16 @@ function apiGet(path, params) {
 }
 
 /**
+ * **봇↔서버 계약 버전** (메인 저장소 decision 033). 요청마다 `X-Bot-Api-Version`으로 싣는다.
+ * `/api/bot/*`의 라우트·필드·의미를 바꾸면 서버 `src/lib/bot-auth.ts`의 같은 이름 상수와
+ * **같이** 올린다. 판정은 서버가 한다 — 범위를 벗어나면 409 + `BOT_OUTDATED`/`SERVER_OUTDATED`.
+ *
+ * 서버가 먼저 배포되고 태블릿 pull이 늦으면, 예전에는 `!참석`이 "이 방에서 진행 중인 투표가
+ * 없습니다"처럼 엉뚱하게 실패했다(032 배포 때 실제로). 이제 "봇이 옛 버전입니다"가 나온다.
+ */
+var BOT_API_VERSION = 1;
+
+/**
  * POST/DELETE — 참석 신청과 취소가 쓴다.
  *
  * **이 봇이 처음으로 쓰는 요청이다.** decision 016은 읽기 전용으로 붙였고, 참석
@@ -191,6 +201,7 @@ function apiCall(method, path, params, body) {
     conn.setConnectTimeout(cfg.timeout);
     conn.setReadTimeout(cfg.timeout);
     conn.setRequestProperty("Authorization", "Bearer " + cfg.botToken);
+    conn.setRequestProperty("X-Bot-Api-Version", String(BOT_API_VERSION));
 
     // 본문은 **UTF-8 바이트로 직접 쓴다.** 카톡 표시명이 한글이라 기본 인코딩에
     // 맡기면 서버에 깨져서 저장되고, 그러면 취소가 자기 신청을 못 찾는다.
@@ -238,6 +249,11 @@ function apiCall(method, path, params, body) {
     var body = JSON.parse(text);
 
     if (status === 401) return { error: "토큰이 맞지 않습니다.", kind: "auth" };
+    // 버전 불일치는 **서버 문구를 그대로** 낸다 — 헤더를 모르는 옛 봇도 그 문구를 보므로 한 벌로
+    // 둔다(decision 016의 예외). 호출부는 대부분 `res.error`를 답장하므로 손댈 게 없고,
+    // `kind`는 `!핑`·`!도움말`이 가르는 데 쓴다.
+    if (body.code === "BOT_OUTDATED" || body.code === "SERVER_OUTDATED")
+      return { error: body.error, kind: "version", code: body.code };
     // **`code`를 같이 넘긴다.** 서버가 code를 내는 이유가 이것이다 — 호출부가 실패
     // 이유를 문자열 매칭으로 알아내면 서버 문구를 고칠 때마다 봇이 조용히 틀린다.
     // `options`는 선택지를 못 골랐을 때 서버가 같이 주는 선택지 이름들이다.
@@ -618,6 +634,8 @@ function handleHelp(room, isGroupChat) {
   if (!isGroupChat) return helpText();
 
   var res = apiGet("/api/bot/poll", { room: String(room) });
+  // 버전이 다르면 도움말이 알려주는 명령이 전부 같은 답만 낸다. 그걸 먼저 말한다.
+  if (res.kind === "version") return res.error;
   if (res.error) {
     Log.i("[" + scriptName + "] help: 투표 확인 실패, 기본 도움말만 — " + res.error);
     return helpText();
@@ -803,12 +821,24 @@ function handlePing() {
 
   if (res.kind === "auth") return "봇 ✅\n설정 ✅\n서버 ✅\n토큰 ❌ — 서버와 값이 다릅니다";
   if (res.kind === "network") return "봇 ✅\n설정 ✅\n서버 ❌ — 연결되지 않습니다";
+  // 서버가 토큰 다음에 버전을 본다(decision 033). 문구에 어느 쪽을 올릴지가 들어 있다.
+  if (res.kind === "version") return "봇 ✅\n설정 ✅\n서버 ✅\n토큰 ✅\n버전 ❌ — " + res.error;
   if (res.error) return "봇 ✅\n설정 ✅\n서버 ⚠️ — " + res.error;
 
   // 서버는 살아있는데 DB만 죽은 경우를 가른다. 그래야 "서버 정상인데 조회가 안 된다"를
   // 설명할 수 있다.
   var dbLine = res.db ? "DB ✅" : "DB ❌ — 서버는 살아있으나 조회 불가";
-  return "봇 ✅\n설정 ✅\n서버 ✅\n토큰 ✅\n" + dbLine;
+  return "봇 ✅\n설정 ✅\n서버 ✅\n토큰 ✅\n" + versionLine(res.apiVersion) + "\n" + dbLine;
+}
+
+/**
+ * 통과했어도 숫자가 다를 수 있다 — 서버는 최소 버전 이상이면 받아준다. 그때는 둘 다 보여준다.
+ * `apiVersion`이 없으면 버전 검사가 들어가기 전의 서버다.
+ */
+function versionLine(serverVersion) {
+  if (serverVersion === undefined || serverVersion === null) return "버전 ✅ 봇 v" + BOT_API_VERSION + " · 서버 v?";
+  if (Number(serverVersion) === BOT_API_VERSION) return "버전 ✅ v" + BOT_API_VERSION;
+  return "버전 ✅ 봇 v" + BOT_API_VERSION + " · 서버 v" + serverVersion;
 }
 
 function handleUnpaid() {

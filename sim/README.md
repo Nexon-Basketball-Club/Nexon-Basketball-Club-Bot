@@ -57,6 +57,18 @@ npm run db:up && npm run db:scenario unpaid-name-mismatch && npm run dev
 방에 연결된 투표가 있는지 서버에 묻지만, 개인톡엔 투표가 연결될 수 없어서 묻지 않는다. 그래서 DB에
 무슨 투표가 있든 같은 출력이 나온다. 두 지시어 모두 스냅샷에 `> @room …` 줄로 남는다.
 
+**`@apiVersion N`** (CLI `--api-version N`) — 이 줄부터 봇의 `BOT_API_VERSION`을 N으로 덮는다
+(메인 decision 033). `nbcdues.js` 사본을 고치지 않고 옛 봇·새 봇을 흉내낸다. 서버 상수는 그대로라
+`0`이면 "봇이 옛 버전", `99`면 "서버가 옛 버전"이 나온다. 스위트 `version`이 쓴다 — 서버 상수를
+올리면 그 스냅샷의 `서버 v1`도 바뀐다.
+
+**헤더를 아예 안 싣는 옛 봇**은 그 커밋의 스크립트를 꺼내 `--script`로 돌린다(`sim/out`은 gitignore):
+
+```bash
+git show 80c24df:nbcdues.js > sim/out/nbcdues-80c24df.js
+./sim/run.sh --script sim/out/nbcdues-80c24df.js '!핑' '!참석'
+```
+
 ## 엔진 옵션
 
 ```bash

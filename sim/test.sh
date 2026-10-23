@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 전체 회귀. 각 스냅샷은 메인 저장소의 같은 이름 시나리오와 짝이다.
 #
-#   ./sim/test.sh                 # basic/server만 (DB 시나리오 불필요)
+#   ./sim/test.sh                 # basic/server/version만 (DB 시나리오 불필요)
 #   ./sim/test.sh --with-db /path/to/Nexon-Basketball-Club
 #
 # --with-db를 주면 시나리오를 심어가며 전부 돈다. dev 서버가 떠 있어야 한다.
@@ -17,6 +17,7 @@ run() {
 
 run basic
 run server
+run version
 
 if [ -n "$MAIN" ]; then
   # poll은 상태를 바꾸는 명령어라 시나리오 재심기가 필수다 — run()마다 심어주는

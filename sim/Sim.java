@@ -32,6 +32,9 @@ import org.mozilla.javascript.Undefined;
  *             다른 방의 투표가 안 보이는지를 한 스위트 안에서 방을 바꿔가며 본다
  *   @dm       이 줄부터 개인톡으로 보낸다. CLI로는 --dm. 개인톡엔 투표가 없어서 `!도움말`이
  *             서버를 안 탄다 — 서버·DB 무관한 출력을 고정할 때 쓴다(basic)
+ *   @apiVersion N  이 줄부터 봇의 `BOT_API_VERSION`을 N으로 덮는다. CLI로는 --api-version.
+ *             옛 봇/새 봇을 흉내내 서버의 버전 거절(decision 033)을 본다 — nbcdues.js를 고친
+ *             사본 없이. 서버 쪽 상수는 그대로라 "봇이 옛것"(0)·"서버가 옛것"(99)을 둘 다 만든다
  *
  * 스냅샷과 비교할 때는 시계에 달린 값(마감 시각·남은 시간·분기)을 가린다 — `mask()`.
  */
@@ -144,6 +147,7 @@ public class Sim {
     String suite = null;
     String snapshot = null;
     boolean update = false;
+    Double apiVersion = null;          // null이면 스크립트의 값 그대로
     List<String> messages = new ArrayList<>();
 
     for (int i = 0; i < args.length; i++) {
@@ -159,6 +163,7 @@ public class Sim {
         case "--suite":    suite = args[++i]; break;
         case "--snapshot": snapshot = args[++i]; break;
         case "--update":   update = true; break;
+        case "--api-version": apiVersion = Double.valueOf(args[++i]); break;
         default:           messages.add(args[i]);
       }
     }
@@ -194,6 +199,13 @@ public class Sim {
         transcript.append("\n");
         continue;
       }
+      if (msg.startsWith("@apiVersion ")) {
+        apiVersion = Double.valueOf(msg.substring(12).trim());
+        transcript.append("\n");
+        continue;
+      }
+      // 줄마다 새로 로드하면 스크립트의 값으로 돌아가므로 매번 다시 덮는다.
+      if (apiVersion != null) setGlobal(bot, "BOT_API_VERSION", apiVersion, optLevel, langVersion);
 
       String note = null;
       if (msg.equals("@tick")) {
@@ -270,6 +282,16 @@ public class Sim {
       String src = new String(Files.readAllBytes(Paths.get(script)), StandardCharsets.UTF_8);
       cx.evaluateString(bot.scope, src, script, 1, null);
       return bot;
+    } finally {
+      Context.exit();
+    }
+  }
+
+  /** 로드된 스크립트의 전역 `var` 하나를 바꾼다. 함수들은 호출 때 전역을 읽으므로 다음 호출부터 먹는다. */
+  static void setGlobal(Bot bot, String name, Object value, int optLevel, int langVersion) {
+    enter(optLevel, langVersion);
+    try {
+      ScriptableObject.putProperty(bot.scope, name, value);
     } finally {
       Context.exit();
     }
