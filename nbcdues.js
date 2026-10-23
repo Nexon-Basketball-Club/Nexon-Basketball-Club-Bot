@@ -548,6 +548,207 @@ function handleCancel(sender, room) {
   return formatCancel(res);
 }
 
+// ============================================================
+// 공지 — 마감 1시간 전 / 30분 전 / 마감 (decision 031)
+// ============================================================
+//
+// 봇이 **먼저 말을 거는** 유일한 자리다. 메신저봇R은 알림의 답장 버튼으로 보내므로,
+// 봇이 켜진 뒤 그 방에서 알림을 한 번이라도 받았으면 `Api.replyRoom`으로 아무 때나
+// 보낼 수 있다. 한 번도 못 받았으면(태블릿·앱 재시작 직후) 못 보낸다 — 그때는 그 방에
+// 다음 메시지가 올 때 보낸다. 메시지가 왔다는 게 곧 세션이 생겼다는 뜻이다.
+//
+// **언제 보낼지는 서버가 정한다.** 봇은 "지금 낼 공지"와 "다음에 언제 물어볼지"를 받아
+// 그대로 따른다. 간격이 상대값(ms)이라 태블릿 시계가 틀려도 상관없다. 서버는 투표가
+// 열려 있으면 10분마다(총무가 웹에서 마감을 옮겼는지 알 길이 그것뿐이다), 알림 시점이
+// 그보다 가까우면 그 시점 직후로 당겨서 준다.
+//
+// **보냈다는 기록도 서버에 있다.** 메모리에 두면 재컴파일 때 사라져 같은 공지를 또 낸다.
+
+var NOTICE_FIRST_MS = 5000;              // 로드 직후 첫 확인
+var NOTICE_RETRY_MS = 10 * 60 * 1000;    // 서버를 못 붙었을 때
+// 타이머가 이만큼 밀렸으면 멈춘 걸로 본다. 안드로이드가 화면 꺼진 태블릿의 CPU를 재우면
+// 타이머가 제때 안 돈다 — 그래도 카톡 알림은 기기를 깨우므로, 메시지가 오면 밀린 확인을 한다.
+var NOTICE_OVERDUE_MS = 30 * 1000;
+
+var noticeTimer = null;
+var noticeDueAt = 0;          // 다음 확인 예정 시각 (태블릿 시계)
+var noticePending = false;    // 낼 공지가 있었는데 세션이 없어 못 냈다
+var noticeStopped = false;    // 재컴파일이 시작됐다 — 옛 스크립트는 더 예약하지 않는다
+var noticeAcking = {};        // 보냈는데 서버 기록이 실패한 공지. 다시 보내지 않고 기록만 다시 한다
+// 타이머와 메시지 처리가 같은 스레드라는 보장이 없다. 둘이 동시에 확인하면 같은 공지가
+// 두 번 나가므로 하나만 들어가게 한다.
+var noticeLock = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+/**
+ * 공지를 올릴 방. `pollRoom`이 배열이면 **첫 번째 방**이다. 안 적혀 있으면 공지를
+ * 안 한다 — 투표는 아무 방에서나 받더라도(`pollRoomAllowed`), 먼저 말을 걸 방은
+ * 정해져 있어야 한다.
+ */
+function noticeRoom() {
+  var cfg = getConfig();
+  if (!cfg || !cfg.pollRoom) return null;
+  if (typeof cfg.pollRoom === "string") return cfg.pollRoom;
+  return cfg.pollRoom.length > 0 ? String(cfg.pollRoom[0]) : null;
+}
+
+/** 이름 다섯 개씩 한 줄. 카톡이 긴 줄을 이름 중간에서 끊으면 누가 누군지 안 읽힌다. */
+var NAMES_PER_LINE = 5;
+
+function nameLines(names, numbered) {
+  var lines = [];
+  var cur = [];
+  for (var i = 0; i < names.length; i++) {
+    cur.push(numbered ? (i + 1) + ". " + names[i] : names[i]);
+    if (cur.length === NAMES_PER_LINE) {
+      lines.push(cur.join(numbered ? "  " : ", "));
+      cur = [];
+    }
+  }
+  if (cur.length > 0) lines.push(cur.join(numbered ? "  " : ", "));
+  return lines.join(numbered ? "\n" : ",\n");
+}
+
+/**
+ * 마감 공지. **명단을 전부 싣는다** — 마감 순간 모두가 궁금한 건 "내가 들어갔나"
+ * 하나라서, 링크를 눌러야 답이 나오면 안 된다. 표시명은 원래 그 방에 보이는
+ * 이름이라 새로 드러나는 것도 없다.
+ */
+function formatClosedNotice(n) {
+  var single = n.options.length === 1;
+  var blocks = [n.title + " 투표가 마감되었습니다."];
+  for (var i = 0; i < n.options.length; i++) {
+    var o = n.options[i];
+    var prefix = single ? "" : "[" + o.label + "] ";
+    if (o.confirmed.length === 0) {
+      blocks.push(prefix + "신청자가 없습니다.");
+      continue;
+    }
+    blocks.push(prefix + "확정 " + o.confirmed.length + "명\n" + nameLines(o.confirmed, false));
+    if (o.waiting.length > 0) {
+      blocks.push(prefix + "대기 " + o.waiting.length + "명\n" + nameLines(o.waiting, true));
+    }
+  }
+  return blocks.join("\n\n");
+}
+
+function reminderCount(o) {
+  var n = o.confirmed.length;
+  if (o.capacity === null || o.capacity === undefined) return "지금 " + n + "명 신청";
+  var base = "확정 " + n + "/" + o.capacity;
+  if (o.waiting.length > 0) return base + " · 대기 " + o.waiting.length + "명";
+  if (n >= o.capacity) return base + " · 정원 마감";
+  return base + " · " + (o.capacity - n) + "자리 남음";
+}
+
+/**
+ * 마감 전 알림. 아직 신청 안 한 사람을 부르는 게 목적이라 **명단 대신 남은 자리**를
+ * 말한다. 남은 시간은 서버가 준 실제 값이다 — 태블릿이 늦게 깨서 1시간 전 알림이
+ * 45분 전에 나가면 "45분 전"이라고 말해야 한다.
+ */
+function formatReminder(n) {
+  var m = n.minutesLeft;
+  var left = m >= 60 && m % 60 === 0 ? m / 60 + "시간" : m + "분";
+  var single = n.options.length === 1;
+  var lines = [n.title + " 투표 마감 " + left + " 전입니다."];
+  for (var i = 0; i < n.options.length; i++) {
+    var o = n.options[i];
+    lines.push((single ? "" : "[" + o.label + "] ") + reminderCount(o));
+  }
+  lines.push("신청: !참석");
+  return lines.join("\n");
+}
+
+/**
+ * 공지 하나를 보내고 서버에 기록한다. 못 보냈으면 false.
+ *
+ * **순서는 보내기 → 기록이다.** 기록을 먼저 하면 세션이 없어 못 보낸 공지가 보낸
+ * 것으로 남아 영영 안 나간다. 기록이 실패하면 다음 확인 때 같은 공지가 또 오는데,
+ * `noticeAcking`에 키가 있으면 다시 보내지 않고 기록만 다시 한다.
+ *
+ * 반환값은 `String()`으로 본다. 메신저봇R이 Java `boolean`을 주는지 `Boolean` 객체를
+ * 주는지 모르고, 객체로 감싸져 오면 `!ok`가 항상 false라 실패를 성공으로 읽는다.
+ */
+function sendNotice(room, n) {
+  var key = n.pollId + "#" + n.minutesBefore + "#" + n.closesAt;
+  if (!noticeAcking[key]) {
+    if (typeof Api.canReply === "function" && String(Api.canReply(room)) === "false") {
+      Log.i("[" + scriptName + "] notice " + n.minutesBefore + " 보류 — 세션 없음, 방에 메시지가 오면 보낸다");
+      return false;
+    }
+    var text = n.minutesBefore === 0 ? formatClosedNotice(n) : formatReminder(n);
+    if (String(Api.replyRoom(room, text)) === "false") {
+      Log.i("[" + scriptName + "] notice " + n.minutesBefore + " 보류 — replyRoom 실패");
+      return false;
+    }
+    noticeAcking[key] = true;
+    Log.i("[" + scriptName + "] notice " + n.minutesBefore + " sent " + text.length + " chars");
+  }
+
+  var ack = apiSend("POST", "/api/bot/poll/notices", { pollId: n.pollId, minutesBefore: n.minutesBefore });
+  if (ack.error) {
+    Log.e("[" + scriptName + "] notice 기록 실패 — 다음 확인 때 기록만 다시 한다: " + ack.error);
+    return true;
+  }
+  delete noticeAcking[key];
+  return true;
+}
+
+function scheduleNoticeCheck(ms) {
+  if (noticeStopped) return;
+  noticeDueAt = Date.now() + ms;
+  // 타이머가 없는 버전이면 메시지가 올 때만 확인한다(`maybeCheckNotices`). 정시성은
+  // 잃지만 공지 자체는 나간다.
+  if (typeof setTimeout !== "function") return;
+  if (noticeTimer !== null && typeof clearTimeout === "function") clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(function () { checkNotices("timer"); }, ms);
+}
+
+/** 서버에 물어서 낼 공지를 내고, 서버가 준 간격으로 다음 확인을 예약한다. */
+function checkNotices(source) {
+  if (!noticeLock.compareAndSet(false, true)) return;
+  var next = NOTICE_RETRY_MS;
+  try {
+    var room = noticeRoom();
+    if (!room) {
+      Log.i("[" + scriptName + "] notice off — config.json에 pollRoom이 없다");
+      next = 0;
+      return;
+    }
+    var res = apiGet("/api/bot/poll/notices", {});
+    if (res.error) {
+      Log.e("[" + scriptName + "] notice 확인 실패(" + source + "): " + res.error);
+      return;
+    }
+    if (res.nextCheckMs) next = Number(res.nextCheckMs);
+
+    noticePending = false;
+    var notices = res.notices || [];
+    for (var i = 0; i < notices.length; i++) {
+      // 하나가 막히면 뒤도 같은 이유(세션)로 막힌다. 순서를 지키려고 거기서 멈춘다.
+      if (!sendNotice(room, notices[i])) {
+        noticePending = true;
+        break;
+      }
+    }
+  } catch (e) {
+    Log.e("[" + scriptName + "] notice " + e + " @ " + (e.lineNumber || "?"));
+  } finally {
+    noticeLock.set(false);
+    if (next > 0) scheduleNoticeCheck(next);
+  }
+}
+
+/**
+ * 공지 방에 메시지가 왔을 때. **밀린 게 있을 때만** 서버에 묻는다 — 못 보낸 공지가
+ * 있거나(이제 세션이 생겼다), 타이머가 제때 안 돌았거나. 평소 대화마다 묻지 않는다.
+ */
+function maybeCheckNotices(room) {
+  var target = noticeRoom();
+  if (!target || String(room) !== target) return;
+  if (!noticePending && Date.now() < noticeDueAt + NOTICE_OVERDUE_MS) return;
+  checkNotices("message");
+}
+
 function handlePing() {
   var cfg = getConfig();
   if (!cfg) return "봇 ✅\n설정 ❌\n" + configError;
@@ -624,8 +825,19 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
     // 로그가 실패해도 본 흐름은 계속한다
   }
 
-  if (!msg || msg.charAt(0) !== "!") return;
+  if (msg && msg.charAt(0) === "!") handleMessage(room, msg, sender, replier);
 
+  // **명령어 답장 뒤에** 본다 — 공지 확인이 HTTP 한 번만큼 답장을 늦추지 않게.
+  // `!`가 아닌 평범한 대화에도 돈다. 세션 없이 밀려 있던 공지는 그 방에 아무 메시지나
+  // 와야 나갈 수 있기 때문이다.
+  try {
+    maybeCheckNotices(room);
+  } catch (e) {
+    Log.e("[" + scriptName + "] notice " + e);
+  }
+}
+
+function handleMessage(room, msg, sender, replier) {
   var parts = msg.trim().split(/\s+/);
   var command = parts[0].substring(1);
   var params = parts.slice(1);
@@ -643,6 +855,17 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
     Log.e("[" + scriptName + "] " + e + " @ " + (e.lineNumber || "?"));
     replier.reply("오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
   }
+}
+
+/**
+ * 메신저봇R이 스크립트를 **다시 읽기 직전에** 부른다. 옛 스크립트의 타이머를 여기서
+ * 끄지 않으면 재컴파일할 때마다 타이머가 하나씩 쌓여 같은 공지가 여러 번 나간다 —
+ * 다른 봇에서 스레드 16개가 쌓여 같은 메시지가 6~7번 나간 사례가 있다.
+ */
+function onStartCompile() {
+  noticeStopped = true;
+  if (noticeTimer !== null && typeof clearTimeout === "function") clearTimeout(noticeTimer);
+  noticeTimer = null;
 }
 
 // ============================================================
@@ -668,3 +891,11 @@ function onResume(activity) {}
 function onPause(activity) {}
 
 function onStop(activity) {}
+
+// ============================================================
+// 시작
+// ============================================================
+//
+// 파일 끝에서 건다. 위의 `var` 초기화가 전부 끝난 뒤여야 한다 — 함수 선언은
+// 끌어올려지지만 `noticeLock` 같은 값은 그 줄을 지나야 생긴다.
+scheduleNoticeCheck(NOTICE_FIRST_MS);

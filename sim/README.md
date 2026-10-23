@@ -53,13 +53,30 @@ npm run db:up && npm run db:scenario unpaid-name-mismatch && npm run dev
 
 ## 흉내내는 것
 
-`Log` / `FileStream` / `replier` / `response()` 호출. 이 넷뿐이다.
+`Log` / `FileStream` / `replier` / `response()` 호출, 그리고 봇이 먼저 올리는 공지
+(메인 저장소 decision 031)를 위한 `Api.replyRoom`·`Api.canReply`와 `setTimeout`/`clearTimeout`.
 
 `java.net.URL`·`BufferedReader`·`StringBuilder`는 Rhino의 LiveConnect가 진짜로
 제공하므로 손대지 않았다. HTTP 경로가 태블릿과 **같은 코드**로 돈다.
 
 `android.widget.TextView`를 쓰는 `onCreate` 등 라이프사이클 콜백은 부르지 않는다.
-설정 화면 UI라 메시지 처리와 무관하다.
+설정 화면 UI라 메시지 처리와 무관하다. `onStartCompile`도 부르지 않는다.
+
+### 공지 — 세션과 타이머
+
+- **세션을 진짜처럼 흉내낸다.** 로드 직후엔 어느 방에도 세션이 없고, `response()`가 불린 방에만
+  생긴다. 메신저봇R이 알림의 답장 버튼으로 보내기 때문이다. 세션 없는 방에 `replyRoom`하면
+  `false`. 보낸 메시지는 `[→ 방이름]` 줄 아래 찍힌다
+- `canReply`/`replyRoom`은 원시 `boolean`이 아니라 **`Boolean` 객체**를 돌려준다. 태블릿이 어느
+  쪽을 주는지 몰라서 까다로운 쪽으로 돌린다 — 객체면 `!ok`가 항상 false다
+- **`setTimeout`은 기다리지 않는다.** 예약만 받아두고 스위트의 `@tick` 줄이 발화시킨다. 그 뒤에
+  남은 예약 간격을 `(다음 확인 10분 뒤)`로 찍는다 — 서버가 준 `nextCheckMs`가 맞는지 보는 자리다
+- **`@persist`** (CLI `--persist`) — 스크립트를 한 번만 로드하고 줄마다 이어 쓴다. 기본은 줄마다
+  새로 로드하는데, 공지는 "세션 없어 보류 → 메시지가 와서 발송"처럼 줄 사이에 상태가 이어진다
+
+```bash
+./sim/run.sh --persist '@tick' '안녕하세요' '@tick'
+```
 
 ## 이 시뮬레이터가 진짜인지 어떻게 아나
 
@@ -94,6 +111,8 @@ $ ./sim/run.sh --script <const-version.js> '!미납'
 | `unpaid-name-mismatch` | `npm run db:scenario unpaid-name-mismatch` |
 | `same-name` | `npm run db:scenario same-name` |
 | `ui-volume` | `npm run db:scenario ui-volume` |
+| `notice-closed` | `npm run db:scenario poll-just-closed` — 마감 공지 (`poll-just-closed`보다 먼저) |
+| `notice-reminder` | `npm run db:scenario poll-closing-soon` — 마감 전 알림 |
 
 시나리오는 명부 없이 자기 픽스처를 결정론적으로 만들기 때문에(`M-9` 대역) 누구든 같은
 출력을 재현한다. 전부 한 번에 돌리려면:
