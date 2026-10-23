@@ -28,8 +28,10 @@ import org.mozilla.javascript.Undefined;
  *   @persist  스크립트를 한 번만 로드하고 줄마다 이어 쓴다 (태블릿처럼). 공지처럼
  *             줄 사이에 상태가 이어져야 하는 스위트가 쓴다. CLI로는 --persist
  *   @tick     예약된 타이머를 지금 발화시킨다. 다음 예약 간격을 같이 찍는다
- *   @room 방  이 스위트를 보낼 방. CLI로는 --room. `pollRoom`이 아닌 방에서 서버를 안 타는
- *             응답(기본 도움말)을 고정할 때 쓴다
+ *   @room 방  **이 줄부터** 보낼 단톡방. CLI로는 --room. 투표는 방 단위라(decision 032) 연결·이동·
+ *             다른 방의 투표가 안 보이는지를 한 스위트 안에서 방을 바꿔가며 본다
+ *   @dm       이 줄부터 개인톡으로 보낸다. CLI로는 --dm. 개인톡엔 투표가 없어서 `!도움말`이
+ *             서버를 안 탄다 — 서버·DB 무관한 출력을 고정할 때 쓴다(basic)
  *
  * 스냅샷과 비교할 때는 시계에 달린 값(마감 시각·남은 시간·분기)을 가린다 — `mask()`.
  */
@@ -166,7 +168,6 @@ public class Sim {
         String t = line.trim();
         if (t.isEmpty() || t.startsWith("#")) continue;
         if (t.equals("@persist")) { persist = true; continue; }
-        if (t.startsWith("@room ")) { room = t.substring(6).trim(); continue; }
         messages.add(t);
       }
     }
@@ -180,6 +181,19 @@ public class Sim {
       // 스크립트는 기본적으로 줄마다 새로 로드한다 — 메신저봇R도 봇마다 독립 스코프이고,
       // 캐시(configCache)가 테스트 사이에 새는 걸 막는다. `@persist`면 태블릿처럼 이어 쓴다.
       Bot bot = shared != null ? shared : load(script, cfg, optLevel, langVersion);
+
+      // 방·개인톡 전환은 그 줄부터 적용된다. 스냅샷에 남겨서 어느 방에서 친 건지 읽히게 한다.
+      if (msg.startsWith("@room ")) {
+        room = msg.substring(6).trim();
+        isGroupChat = true;
+        transcript.append("\n");
+        continue;
+      }
+      if (msg.equals("@dm")) {
+        isGroupChat = false;
+        transcript.append("\n");
+        continue;
+      }
 
       String note = null;
       if (msg.equals("@tick")) {
@@ -314,7 +328,9 @@ public class Sim {
     return s
         .replaceAll("\\d{1,2}/\\d{1,2} \\([월화수목금토일]\\) \\d{2}:\\d{2}", "M/D (요) HH:MM")
         .replaceAll("(\\d+일 \\d+시간|\\d+시간 \\d+분|\\d+분) 남음", "N 남음")
-        .replaceAll("\\d{4} Q[1-4] 회원", "YYYY Qn 회원");
+        .replaceAll("\\d{4} Q[1-4] 회원", "YYYY Qn 회원")
+        // 연결 공지의 명단 링크. 투표 id는 시나리오를 심을 때마다 새로 생긴다.
+        .replaceAll("/poll/[0-9a-f-]{36}", "/poll/{id}");
   }
 
   /** 줄 단위로 첫 차이 지점을 보여준다. 스냅샷이 길어도 어디가 바뀌었는지 바로 보이게. */

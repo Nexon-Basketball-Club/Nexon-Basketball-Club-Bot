@@ -509,40 +509,12 @@ function formatAttend(r) {
 }
 
 /**
- * 취소 결과. **승계를 여기에 같이 싣는 게 요점이다.**
- *
- * 봇은 먼저 말을 걸 수 없다(알림 리플라이 토큰 방식). 그래서 "대기 1번이 확정됐습니다"를
- * 알릴 수 있는 자리가 이 답장뿐이다 — 단톡방에 뜨므로 승계된 사람이 본다.
- * 이 두 번째 줄을 빼면 대기자는 자기 차례가 온 걸 영영 모른다.
+ * 취소 결과. **승계는 여기 싣지 않는다** — 서버가 메시지함에 쌓고 봇이 이 답장 바로 뒤에
+ * 올린다(decision 032). 총무가 웹에서 지웠을 때와 같은 길·같은 문구다. 예전엔 봇이 먼저 말을
+ * 걸 수 없다고 봐서 승계를 알릴 자리가 이 답장뿐이었다.
  */
 function formatCancel(r) {
-  var text = r.voterName + " 님 취소되었습니다.";
-  if (r.promoted) {
-    text = text + "\n대기 1번 " + r.promoted.voterName + " 님이 " +
-      r.promoted.optionLabel + " 확정되었습니다. (" + attendCount(r) + ")";
-  }
-  return text;
-}
-
-/**
- * 이 방에서 투표를 받아도 되나.
- *
- * **메신저봇R의 디버그 채팅방에서 `!참석`을 치면 진짜 투표에 들어간다.** 조회
- * 명령어일 땐 무해했지만 쓰기라서 다르다. config.json의 `pollRoom`(문자열 또는 배열)에
- * 적힌 방에서만 받는다. 안 적혀 있으면 아무 방에서나 받는다 — 설정을 강제하면
- * 태블릿에서 config를 못 고치는 상황에 봇이 통째로 막힌다.
- */
-function pollRoomAllowed(room) {
-  var cfg = getConfig();
-  if (!cfg || !cfg.pollRoom) return true;
-
-  var allowed = cfg.pollRoom;
-  if (typeof allowed === "string") return String(room) === allowed;
-
-  for (var i = 0; i < allowed.length; i++) {
-    if (String(room) === String(allowed[i])) return true;
-  }
-  return false;
+  return r.voterName + " 님 취소되었습니다.";
 }
 
 /**
@@ -558,10 +530,9 @@ function pollRoomAllowed(room) {
  * 밀린다. 선택지가 여럿일 때만 `!참석 1부`로 고르고, 못 고르면 칠 줄을 보여준다.
  */
 function handleAttend(params, sender, room) {
-  if (!pollRoomAllowed(room)) return "이 방에서는 투표할 수 없습니다.";
-
   var label = params.join(" ");
-  var res = apiSend("POST", "/api/bot/poll", { voterName: String(sender), optionLabel: label || null });
+  var res = apiSend("POST", "/api/bot/poll", {
+    voterName: String(sender), optionLabel: label || null, room: String(room) });
   if (res.error) {
     // 거절만 하면 무엇을 쳐야 하는지 모른다. 서버가 준 선택지로 그대로 칠 줄을 만든다.
     if (res.options) return res.error + "\n" + optionCommands(res.options);
@@ -576,10 +547,10 @@ function optionCommands(labels) {
   return lines.join("\n");
 }
 
-var NO_POLL = "지금 진행 중인 투표가 없습니다.";
+var NO_POLL = "이 방에서 진행 중인 투표가 없습니다.";
 
 /**
- * `!투표현황` — 명단 전부. 마감 공지(`formatClosedNotice`)와 같은 이유로 링크 대신 이름을
+ * `!투표현황` — 명단 전부. 마감 공지(서버의 `buildClosedText`)와 같은 이유로 링크 대신 이름을
  * 싣는다: 궁금한 건 "내가 들어갔나"이고, 표시명은 원래 그 방에 보이는 이름이다.
  *
  * 확정·대기 둘 다 **순번을 붙인다.** 진행 중에는 몇 번째인지가 곧 정보다 — 정원이 줄면
@@ -604,9 +575,9 @@ function formatPollStatus(poll) {
   return blocks.join("\n\n");
 }
 
-/** 조회라 `pollRoom`을 보지 않는다 — 막은 이유가 디버그 방의 **쓰기**였다. */
-function handlePollStatus() {
-  var res = apiGet("/api/bot/poll", {});
+/** 그 방의 투표만 보인다 — 투표는 단톡방 단위다(decision 032). */
+function handlePollStatus(room) {
+  var res = apiGet("/api/bot/poll", { room: String(room) });
   if (res.error) return res.error;
   if (!res.poll) return NO_POLL;
   return formatPollStatus(res.poll);
@@ -615,10 +586,10 @@ function handlePollStatus() {
 /**
  * `!내순번` — 내 자리만. **`!참석`으로 확인하면 안 되기 때문에 있다** — 신청 안 한 사람이
  * 치면 그대로 신청된다. 정원이 줄어 확정에서 대기로 밀렸는지 확인하는 자리이기도 하다.
- * 봇이 당사자에게 알릴 방법이 없어서, 그 통보는 총무가 붙이는 문구뿐이다(decision 027).
+ * 그 통보는 봇이 메시지함으로 올리지만(decision 032), 지나간 메시지를 찾기보다 쳐보는 게 빠르다.
  */
-function handleMyRank(sender) {
-  var res = apiGet("/api/bot/poll", { voterName: String(sender) });
+function handleMyRank(sender, room) {
+  var res = apiGet("/api/bot/poll", { voterName: String(sender), room: String(room) });
   if (res.error) return res.error;
   if (!res.poll) return NO_POLL;
 
@@ -640,13 +611,13 @@ function handleMyRank(sender) {
  * 서버가 안 붙으면 투표 줄만 빼고 기본 도움말을 낸다. 도움말이 안 나오는 것보다 투표 줄이
  * 빠지는 게 낫고, 원인은 `!핑`이 짚는다.
  *
- * `pollRoom`이 아닌 방에서는 묻지도 않는다. 거기서 `!참석`을 알려주면 "이 방에서는
- * 투표할 수 없습니다"만 받는다.
+ * **개인톡에서는 묻지 않는다.** 투표는 단톡방에만 연결되므로(decision 032) 개인톡에 붙을 투표가
+ * 없다. 단톡방에서는 그 방에 연결된 투표가 있을 때만 투표 줄이 붙는다.
  */
-function handleHelp(room) {
-  if (!pollRoomAllowed(room)) return helpText();
+function handleHelp(room, isGroupChat) {
+  if (!isGroupChat) return helpText();
 
-  var res = apiGet("/api/bot/poll", {});
+  var res = apiGet("/api/bot/poll", { room: String(room) });
   if (res.error) {
     Log.i("[" + scriptName + "] help: 투표 확인 실패, 기본 도움말만 — " + res.error);
     return helpText();
@@ -657,58 +628,70 @@ function handleHelp(room) {
 
 /** `!취소` — 취소. 마감 후에는 서버가 거부한다(명단 동결). */
 function handleCancel(sender, room) {
-  if (!pollRoomAllowed(room)) return "이 방에서는 투표할 수 없습니다.";
-
-  var res = apiSend("DELETE", "/api/bot/poll", { voterName: String(sender) });
+  var res = apiSend("DELETE", "/api/bot/poll", { voterName: String(sender), room: String(room) });
   if (res.error) {
     if (res.code === "NOT_VOTED") return String(sender) + " 님은 신청 내역이 없습니다.";
     return res.error;
   }
+  // 승계가 있으면 서버가 메시지함에 쌓았다 — 답장 뒤에 바로 꺼내 올린다.
+  if (res.promoted) outboxDirty = true;
   return formatCancel(res);
 }
 
-// ============================================================
-// 공지 — 마감 1시간 전 / 30분 전 / 마감 (decision 031)
-// ============================================================
-//
-// 봇이 **먼저 말을 거는** 유일한 자리다. 메신저봇R은 알림의 답장 버튼으로 보내므로,
-// 봇이 켜진 뒤 그 방에서 알림을 한 번이라도 받았으면 `Api.replyRoom`으로 아무 때나
-// 보낼 수 있다. 한 번도 못 받았으면(태블릿·앱 재시작 직후) 못 보낸다 — 그때는 그 방에
-// 다음 메시지가 올 때 보낸다. 메시지가 왔다는 게 곧 세션이 생겼다는 뜻이다.
-//
-// **언제 보낼지는 서버가 정한다.** 봇은 "지금 낼 공지"와 "다음에 언제 물어볼지"를 받아
-// 그대로 따른다. 간격이 상대값(ms)이라 태블릿 시계가 틀려도 상관없다. 서버는 투표가
-// 열려 있으면 10분마다(총무가 웹에서 마감을 옮겼는지 알 길이 그것뿐이다), 알림 시점이
-// 그보다 가까우면 그 시점 직후로 당겨서 준다.
-//
-// **보냈다는 기록도 서버에 있다.** 메모리에 두면 재컴파일 때 사라져 같은 공지를 또 낸다.
+/**
+ * `!투표시작 <코드>` — 웹에서 연 투표를 **이 단톡방에 연결한다**(decision 032). 총무가 친다.
+ *
+ * 답장이 곧 개시 공지다 — 문구는 서버가 만든다(템플릿의 공지 문구, 명단 링크). 이미 다른 방에
+ * 연결돼 있었으면 옮겨진다(잘못 연결, 방 이름 변경). 코드는 총무 화면에만 있어서 그게 곧 권한이다.
+ *
+ * 연결되면 서버가 이 방의 알림을 1분 간격으로 챙기기 시작하므로, 답장 뒤에 바로 한 번 묻는다.
+ */
+function handleBind(params, room, isGroupChat) {
+  if (!isGroupChat) return "투표는 단톡방에서 연결합니다. 진행할 단톡방에서 쳐 주세요.";
+  if (params.length === 0) return "사용법: !투표시작 <웹에 나온 4자리 코드>";
 
-var NOTICE_FIRST_MS = 5000;              // 로드 직후 첫 확인
-var NOTICE_RETRY_MS = 10 * 60 * 1000;    // 서버를 못 붙었을 때
+  var res = apiSend("POST", "/api/bot/poll/bind", { code: params[0], room: String(room) });
+  if (res.error) return res.error;
+
+  outboxDirty = true;
+  if (res.movedFrom) return "'" + res.movedFrom + "'에서 이 방으로 옮겼습니다.\n\n" + res.announcement;
+  return res.announcement;
+}
+
+// ============================================================
+// 메시지함 — 봇이 단톡방에 먼저 올리는 모든 것 (decision 032)
+// ============================================================
+//
+// 메신저봇R은 알림의 답장 버튼으로 보내므로, 봇이 켜진 뒤 그 방에서 알림을 한 번이라도 받았으면
+// `Api.replyRoom`으로 아무 때나 보낼 수 있다. 그 전제 위에서 길을 하나로 합쳤다:
+//
+//     서버가 메시지함에 쌓는다 → 봇이 물어서 꺼낸다 → 그 방에 올린다 → 보냈다고 알린다
+//
+// 마감 1시간·30분 전 알림, 마감 공지, `!취소`의 승계, 총무의 웹 조작(삭제·게스트·정원·마감 변경)이
+// 전부 이 길로 온다. **문구는 서버가 만든다** — 봇은 받은 `text`를 받은 `room`에 그대로 올린다.
+// 그래서 문구를 고칠 때 태블릿을 안 만진다.
+//
+// **언제 물을지도 서버가 정한다.** 간격이 상대값(ms)이라 태블릿 시계가 틀려도 상관없다. 연결된
+// 투표가 열려 있으면 1분, 없으면 30분. 명령에 답한 직후에도 묻는다(`!취소`의 승계가 답장 바로 뒤에).
+//
+// 봇이 뜬 뒤 그 방에서 메시지를 한 번도 못 받았으면(태블릿·앱 재시작 직후) 그 방엔 못 보낸다 —
+// 그때는 그 방에 다음 메시지가 올 때 보낸다. 메시지가 왔다는 게 곧 세션이 생겼다는 뜻이다.
+
+var OUTBOX_FIRST_MS = 5000;              // 로드 직후 첫 확인
+var OUTBOX_RETRY_MS = 10 * 60 * 1000;    // 서버를 못 붙었을 때
 // 타이머가 이만큼 밀렸으면 멈춘 걸로 본다. 안드로이드가 화면 꺼진 태블릿의 CPU를 재우면
 // 타이머가 제때 안 돈다 — 그래도 카톡 알림은 기기를 깨우므로, 메시지가 오면 밀린 확인을 한다.
-var NOTICE_OVERDUE_MS = 30 * 1000;
+var OUTBOX_OVERDUE_MS = 30 * 1000;
 
-var noticeTimer = null;
-var noticeDueAt = 0;          // 다음 확인 예정 시각 (태블릿 시계)
-var noticePending = false;    // 낼 공지가 있었는데 세션이 없어 못 냈다
-var noticeStopped = false;    // 재컴파일이 시작됐다 — 옛 스크립트는 더 예약하지 않는다
-var noticeAcking = {};        // 보냈는데 서버 기록이 실패한 공지. 다시 보내지 않고 기록만 다시 한다
-// 타이머와 메시지 처리가 같은 스레드라는 보장이 없다. 둘이 동시에 확인하면 같은 공지가
+var outboxTimer = null;
+var outboxDueAt = 0;          // 다음 확인 예정 시각 (태블릿 시계)
+var outboxBlocked = {};       // 방 이름 → true: 세션이 없어 못 보낸 메시지가 있다
+var outboxDirty = false;      // 방금 명령이 메시지를 쌓았을 수 있다 — 답장 뒤에 바로 묻는다
+var outboxStopped = false;    // 재컴파일이 시작됐다 — 옛 스크립트는 더 예약하지 않는다
+var outboxAcking = {};        // 보냈는데 서버 기록이 실패한 메시지 id. 다시 보내지 않고 기록만 다시 한다
+// 타이머와 메시지 처리가 같은 스레드라는 보장이 없다. 둘이 동시에 꺼내면 같은 메시지가
 // 두 번 나가므로 하나만 들어가게 한다.
-var noticeLock = new java.util.concurrent.atomic.AtomicBoolean(false);
-
-/**
- * 공지를 올릴 방. `pollRoom`이 배열이면 **첫 번째 방**이다. 안 적혀 있으면 공지를
- * 안 한다 — 투표는 아무 방에서나 받더라도(`pollRoomAllowed`), 먼저 말을 걸 방은
- * 정해져 있어야 한다.
- */
-function noticeRoom() {
-  var cfg = getConfig();
-  if (!cfg || !cfg.pollRoom) return null;
-  if (typeof cfg.pollRoom === "string") return cfg.pollRoom;
-  return cfg.pollRoom.length > 0 ? String(cfg.pollRoom[0]) : null;
-}
+var outboxLock = new java.util.concurrent.atomic.AtomicBoolean(false);
 
 /** 이름 다섯 개씩 한 줄. 카톡이 긴 줄을 이름 중간에서 끊으면 누가 누군지 안 읽힌다. */
 var NAMES_PER_LINE = 5;
@@ -728,144 +711,86 @@ function nameLines(names, numbered) {
 }
 
 /**
- * 마감 공지. **명단을 전부 싣는다** — 마감 순간 모두가 궁금한 건 "내가 들어갔나"
- * 하나라서, 링크를 눌러야 답이 나오면 안 된다. 표시명은 원래 그 방에 보이는
- * 이름이라 새로 드러나는 것도 없다.
- */
-function formatClosedNotice(n) {
-  var single = n.options.length === 1;
-  var blocks = [n.title + " 투표가 마감되었습니다."];
-  for (var i = 0; i < n.options.length; i++) {
-    var o = n.options[i];
-    var prefix = single ? "" : "[" + o.label + "] ";
-    if (o.confirmed.length === 0) {
-      blocks.push(prefix + "신청자가 없습니다.");
-      continue;
-    }
-    blocks.push(prefix + "확정 " + o.confirmed.length + "명\n" + nameLines(o.confirmed, false));
-    if (o.waiting.length > 0) {
-      blocks.push(prefix + "대기 " + o.waiting.length + "명\n" + nameLines(o.waiting, true));
-    }
-  }
-  return blocks.join("\n\n");
-}
-
-function reminderCount(o) {
-  var n = o.confirmed.length;
-  if (o.capacity === null || o.capacity === undefined) return "지금 " + n + "명 신청";
-  var base = "확정 " + n + "/" + o.capacity;
-  if (o.waiting.length > 0) return base + " · 대기 " + o.waiting.length + "명";
-  if (n >= o.capacity) return base + " · 정원 마감";
-  return base + " · " + (o.capacity - n) + "자리 남음";
-}
-
-/**
- * 마감 전 알림. 아직 신청 안 한 사람을 부르는 게 목적이라 **명단 대신 남은 자리**를
- * 말한다. 남은 시간은 서버가 준 실제 값이다 — 태블릿이 늦게 깨서 1시간 전 알림이
- * 45분 전에 나가면 "45분 전"이라고 말해야 한다.
- */
-function formatReminder(n) {
-  var m = n.minutesLeft;
-  var left = m >= 60 && m % 60 === 0 ? m / 60 + "시간" : m + "분";
-  var single = n.options.length === 1;
-  var lines = [n.title + " 투표 마감 " + left + " 전입니다."];
-  for (var i = 0; i < n.options.length; i++) {
-    var o = n.options[i];
-    lines.push((single ? "" : "[" + o.label + "] ") + reminderCount(o));
-  }
-  lines.push("신청: !참석");
-  return lines.join("\n");
-}
-
-/**
- * 공지 하나를 보내고 서버에 기록한다. 못 보냈으면 false.
+ * 메시지 하나를 그 방에 올리고 서버에 기록한다. 못 보냈으면 false.
  *
- * **순서는 보내기 → 기록이다.** 기록을 먼저 하면 세션이 없어 못 보낸 공지가 보낸
- * 것으로 남아 영영 안 나간다. 기록이 실패하면 다음 확인 때 같은 공지가 또 오는데,
- * `noticeAcking`에 키가 있으면 다시 보내지 않고 기록만 다시 한다.
+ * **순서는 보내기 → 기록이다.** 기록을 먼저 하면 세션이 없어 못 보낸 메시지가 보낸 것으로 남아
+ * 영영 안 나간다. 기록이 실패하면 다음 확인 때 같은 메시지가 또 오는데, `outboxAcking`에 id가
+ * 있으면 다시 보내지 않고 기록만 다시 한다.
  *
- * 반환값은 `String()`으로 본다. 메신저봇R이 Java `boolean`을 주는지 `Boolean` 객체를
- * 주는지 모르고, 객체로 감싸져 오면 `!ok`가 항상 false라 실패를 성공으로 읽는다.
+ * 반환값은 `String()`으로 본다. 메신저봇R이 Java `boolean`을 주는지 `Boolean` 객체를 주는지
+ * 모르고, 객체로 감싸져 오면 `!ok`가 항상 false라 실패를 성공으로 읽는다.
  */
-function sendNotice(room, n) {
-  var key = n.pollId + "#" + n.minutesBefore + "#" + n.closesAt;
-  if (!noticeAcking[key]) {
-    if (typeof Api.canReply === "function" && String(Api.canReply(room)) === "false") {
-      Log.i("[" + scriptName + "] notice " + n.minutesBefore + " 보류 — 세션 없음, 방에 메시지가 오면 보낸다");
+function sendOutboxMessage(m) {
+  if (!outboxAcking[m.id]) {
+    if (typeof Api.canReply === "function" && String(Api.canReply(m.room)) === "false") {
+      Log.i("[" + scriptName + "] outbox 보류 — " + m.room + " 세션 없음, 그 방에 메시지가 오면 보낸다");
       return false;
     }
-    var text = n.minutesBefore === 0 ? formatClosedNotice(n) : formatReminder(n);
-    if (String(Api.replyRoom(room, text)) === "false") {
-      Log.i("[" + scriptName + "] notice " + n.minutesBefore + " 보류 — replyRoom 실패");
+    if (String(Api.replyRoom(m.room, m.text)) === "false") {
+      Log.i("[" + scriptName + "] outbox 보류 — " + m.room + " replyRoom 실패");
       return false;
     }
-    noticeAcking[key] = true;
-    Log.i("[" + scriptName + "] notice " + n.minutesBefore + " sent " + text.length + " chars");
+    outboxAcking[m.id] = true;
+    Log.i("[" + scriptName + "] outbox sent " + m.text.length + " chars → " + m.room);
   }
 
-  var ack = apiSend("POST", "/api/bot/poll/notices", { pollId: n.pollId, minutesBefore: n.minutesBefore });
+  var ack = apiSend("POST", "/api/bot/outbox", { id: m.id });
   if (ack.error) {
-    Log.e("[" + scriptName + "] notice 기록 실패 — 다음 확인 때 기록만 다시 한다: " + ack.error);
+    Log.e("[" + scriptName + "] outbox 기록 실패 — 다음 확인 때 기록만 다시 한다: " + ack.error);
     return true;
   }
-  delete noticeAcking[key];
+  delete outboxAcking[m.id];
   return true;
 }
 
-function scheduleNoticeCheck(ms) {
-  if (noticeStopped) return;
-  noticeDueAt = Date.now() + ms;
-  // 타이머가 없는 버전이면 메시지가 올 때만 확인한다(`maybeCheckNotices`). 정시성은
-  // 잃지만 공지 자체는 나간다.
+function scheduleOutboxCheck(ms) {
+  if (outboxStopped) return;
+  outboxDueAt = Date.now() + ms;
+  // 타이머가 없는 버전이면 메시지가 올 때만 확인한다(`maybeCheckOutbox`). 정시성은
+  // 잃지만 메시지 자체는 나간다.
   if (typeof setTimeout !== "function") return;
-  if (noticeTimer !== null && typeof clearTimeout === "function") clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(function () { checkNotices("timer"); }, ms);
+  if (outboxTimer !== null && typeof clearTimeout === "function") clearTimeout(outboxTimer);
+  outboxTimer = setTimeout(function () { checkOutbox("timer"); }, ms);
 }
 
-/** 서버에 물어서 낼 공지를 내고, 서버가 준 간격으로 다음 확인을 예약한다. */
-function checkNotices(source) {
-  if (!noticeLock.compareAndSet(false, true)) return;
-  var next = NOTICE_RETRY_MS;
+/** 서버에 물어서 메시지를 꺼내 올리고, 서버가 준 간격으로 다음 확인을 예약한다. */
+function checkOutbox(source) {
+  if (!outboxLock.compareAndSet(false, true)) return;
+  var next = OUTBOX_RETRY_MS;
   try {
-    var room = noticeRoom();
-    if (!room) {
-      Log.i("[" + scriptName + "] notice off — config.json에 pollRoom이 없다");
-      next = 0;
-      return;
-    }
-    var res = apiGet("/api/bot/poll/notices", {});
+    outboxDirty = false;
+    var res = apiGet("/api/bot/outbox", {});
     if (res.error) {
-      Log.e("[" + scriptName + "] notice 확인 실패(" + source + "): " + res.error);
+      Log.e("[" + scriptName + "] outbox 확인 실패(" + source + "): " + res.error);
       return;
     }
     if (res.nextCheckMs) next = Number(res.nextCheckMs);
 
-    noticePending = false;
-    var notices = res.notices || [];
-    for (var i = 0; i < notices.length; i++) {
-      // 하나가 막히면 뒤도 같은 이유(세션)로 막힌다. 순서를 지키려고 거기서 멈춘다.
-      if (!sendNotice(room, notices[i])) {
-        noticePending = true;
-        break;
-      }
+    outboxBlocked = {};
+    var messages = res.messages || [];
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      // 한 방이 막히면 그 방의 뒤 메시지도 같은 이유(세션)로 막힌다. 순서를 지키려고 그 방은
+      // 거기서 멈추고, 다른 방은 계속 보낸다.
+      if (outboxBlocked[m.room]) continue;
+      if (!sendOutboxMessage(m)) outboxBlocked[m.room] = true;
     }
   } catch (e) {
-    Log.e("[" + scriptName + "] notice " + e + " @ " + (e.lineNumber || "?"));
+    Log.e("[" + scriptName + "] outbox " + e + " @ " + (e.lineNumber || "?"));
   } finally {
-    noticeLock.set(false);
-    if (next > 0) scheduleNoticeCheck(next);
+    outboxLock.set(false);
+    if (next > 0) scheduleOutboxCheck(next);
   }
 }
 
 /**
- * 공지 방에 메시지가 왔을 때. **밀린 게 있을 때만** 서버에 묻는다 — 못 보낸 공지가
- * 있거나(이제 세션이 생겼다), 타이머가 제때 안 돌았거나. 평소 대화마다 묻지 않는다.
+ * 메시지가 왔을 때(그 답장 뒤에). **밀린 게 있을 때만** 서버에 묻는다 — 방금 명령이 메시지를
+ * 쌓았을 수 있거나, 이 방에 못 보낸 메시지가 있거나(이제 세션이 생겼다), 타이머가 제때 안 돌았거나.
+ * 평소 대화마다 묻지 않는다.
  */
-function maybeCheckNotices(room) {
-  var target = noticeRoom();
-  if (!target || String(room) !== target) return;
-  if (!noticePending && Date.now() < noticeDueAt + NOTICE_OVERDUE_MS) return;
-  checkNotices("message");
+function maybeCheckOutbox(room) {
+  if (!outboxDirty && !outboxBlocked[String(room)] && Date.now() < outboxDueAt + OUTBOX_OVERDUE_MS) return;
+  checkOutbox("message");
 }
 
 function handlePing() {
@@ -893,7 +818,7 @@ function handleUnpaid() {
 }
 
 // sender/room이 여기까지 내려오는 건 참석 투표 때문이다 — 조회 명령어는 안 쓴다.
-function handleCommand(command, params, sender, room) {
+function handleCommand(command, params, sender, room, isGroupChat) {
   switch (command) {
     case "회비":
       return handleDues(params);
@@ -908,10 +833,13 @@ function handleCommand(command, params, sender, room) {
       return handleCancel(sender, room);
 
     case "투표현황":
-      return handlePollStatus();
+      return handlePollStatus(room);
 
     case "내순번":
-      return handleMyRank(sender);
+      return handleMyRank(sender, room);
+
+    case "투표시작":
+      return handleBind(params, room, isGroupChat);
 
     case "미납":
       return handleUnpaid();
@@ -922,7 +850,7 @@ function handleCommand(command, params, sender, room) {
 
     case "도움말":
     case "도움":
-      return handleHelp(room);
+      return handleHelp(room, isGroupChat);
 
     default:
       // 모르는 명령어엔 침묵한다. 다른 봇이나 사람의 ! 로 시작하는 말에
@@ -950,26 +878,26 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
     // 로그가 실패해도 본 흐름은 계속한다
   }
 
-  if (msg && msg.charAt(0) === "!") handleMessage(room, msg, sender, replier);
+  if (msg && msg.charAt(0) === "!") handleMessage(room, msg, sender, isGroupChat, replier);
 
-  // **명령어 답장 뒤에** 본다 — 공지 확인이 HTTP 한 번만큼 답장을 늦추지 않게.
-  // `!`가 아닌 평범한 대화에도 돈다. 세션 없이 밀려 있던 공지는 그 방에 아무 메시지나
-  // 와야 나갈 수 있기 때문이다.
+  // **명령어 답장 뒤에** 본다 — 메시지함 확인이 HTTP 한 번만큼 답장을 늦추지 않게, 그리고
+  // `!취소`의 승계가 취소 답장 바로 뒤에 뜨게. `!`가 아닌 평범한 대화에도 돈다 — 세션 없이
+  // 밀려 있던 메시지는 그 방에 아무 메시지나 와야 나갈 수 있기 때문이다.
   try {
-    maybeCheckNotices(room);
+    maybeCheckOutbox(room);
   } catch (e) {
-    Log.e("[" + scriptName + "] notice " + e);
+    Log.e("[" + scriptName + "] outbox " + e);
   }
 }
 
-function handleMessage(room, msg, sender, replier) {
+function handleMessage(room, msg, sender, isGroupChat, replier) {
   var parts = msg.trim().split(/\s+/);
   var command = parts[0].substring(1);
   var params = parts.slice(1);
 
   try {
     Log.i("[" + scriptName + "] cmd=" + command);
-    var reply = handleCommand(command, params, sender, room);
+    var reply = handleCommand(command, params, sender, room, isGroupChat);
     if (reply) {
       replier.reply(reply);
       Log.i("[" + scriptName + "] replied " + reply.length + " chars");
@@ -984,13 +912,13 @@ function handleMessage(room, msg, sender, replier) {
 
 /**
  * 메신저봇R이 스크립트를 **다시 읽기 직전에** 부른다. 옛 스크립트의 타이머를 여기서
- * 끄지 않으면 재컴파일할 때마다 타이머가 하나씩 쌓여 같은 공지가 여러 번 나간다 —
+ * 끄지 않으면 재컴파일할 때마다 타이머가 하나씩 쌓여 같은 메시지가 여러 번 나간다 —
  * 다른 봇에서 스레드 16개가 쌓여 같은 메시지가 6~7번 나간 사례가 있다.
  */
 function onStartCompile() {
-  noticeStopped = true;
-  if (noticeTimer !== null && typeof clearTimeout === "function") clearTimeout(noticeTimer);
-  noticeTimer = null;
+  outboxStopped = true;
+  if (outboxTimer !== null && typeof clearTimeout === "function") clearTimeout(outboxTimer);
+  outboxTimer = null;
 }
 
 // ============================================================
@@ -1004,7 +932,7 @@ function onStartCompile() {
 
 function onCreate(savedInstanceState, activity) {
   var view = new android.widget.TextView(activity);
-  view.setText("NBC 회비 봇\n\n!참석 [선택지]\n!취소\n!투표현황\n!내순번\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
+  view.setText("NBC 회비 봇\n\n!참석 [선택지]\n!취소\n!투표현황\n!내순번\n!투표시작 <코드> (총무)\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
   view.setTextColor(android.graphics.Color.DKGRAY);
   activity.setContentView(view);
 }
@@ -1022,5 +950,5 @@ function onStop(activity) {}
 // ============================================================
 //
 // 파일 끝에서 건다. 위의 `var` 초기화가 전부 끝난 뒤여야 한다 — 함수 선언은
-// 끌어올려지지만 `noticeLock` 같은 값은 그 줄을 지나야 생긴다.
-scheduleNoticeCheck(NOTICE_FIRST_MS);
+// 끌어올려지지만 `outboxLock` 같은 값은 그 줄을 지나야 생긴다.
+scheduleOutboxCheck(OUTBOX_FIRST_MS);
