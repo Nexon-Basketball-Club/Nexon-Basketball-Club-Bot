@@ -163,8 +163,10 @@ function apiGet(path, params) {
  *
  * 서버가 먼저 배포되고 태블릿 pull이 늦으면, 예전에는 `!참석`이 "이 방에서 진행 중인 투표가
  * 없습니다"처럼 엉뚱하게 실패했다(032 배포 때 실제로). 이제 "봇이 옛 버전입니다"가 나온다.
+ *
+ * 이력: 1 = decision 032. 2 = decision 034 — `!투표시작`이 연결된 투표를 옮기지 않는다(`movedFrom` 없음).
  */
-var BOT_API_VERSION = 1;
+var BOT_API_VERSION = 2;
 
 /**
  * POST/DELETE — 참석 신청과 취소가 쓴다.
@@ -671,8 +673,10 @@ function handleCancel(sender, room) {
 /**
  * `!투표시작 <코드>` — 웹에서 연 투표를 **이 단톡방에 연결한다**(decision 032). 총무가 친다.
  *
- * 답장이 곧 개시 공지다 — 문구는 서버가 만든다(템플릿의 공지 문구, 명단 링크). 이미 다른 방에
- * 연결돼 있었으면 옮겨진다(잘못 연결, 방 이름 변경). 코드는 총무 화면에만 있어서 그게 곧 권한이다.
+ * 답장이 곧 개시 공지다 — 문구는 서버가 만든다(템플릿의 공지 문구, 명단 링크, 이미 신청이 있으면
+ * "지금까지 신청" 줄). **코드는 한 번 쓰면 끝이다**(decision 034) — 총무가 치는 순간 그 방 모두가
+ * 보므로, 연결된 투표의 코드는 어느 방에서 쳐도 서버가 거부한다. 옮기려면 웹에서 연결을 해제하고
+ * 새 코드로 다시 친다. 거부 문구도 서버가 준다(`res.error`).
  *
  * 연결되면 서버가 이 방의 알림을 1분 간격으로 챙기기 시작하므로, 답장 뒤에 바로 한 번 묻는다.
  */
@@ -684,7 +688,6 @@ function handleBind(params, room, isGroupChat) {
   if (res.error) return res.error;
 
   outboxDirty = true;
-  if (res.movedFrom) return "'" + res.movedFrom + "'에서 이 방으로 옮겼습니다.\n\n" + res.announcement;
   return res.announcement;
 }
 
