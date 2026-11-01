@@ -360,6 +360,8 @@ public class Sim {
         .replaceAll("(D-\\d+) \\(\\d{2}/\\d{2}( \\d{2}:\\d{2})?\\)", "$1 (MM/DD HH:MM)")
         .replaceAll("(대회|신청) \\d{4}-\\d{2}-\\d{2} ~ (\\d{4}-)?\\d{2}-\\d{2}", "$1 YYYY-MM-DD ~ MM-DD")
         .replaceAll("(대회|신청) \\d{4}-\\d{2}-\\d{2}", "$1 YYYY-MM-DD")
+        // `!대회`의 BDR 최근 공지 — 게시일
+        .replaceAll("\\(\\d{1,2}/\\d{1,2} 게시\\)", "(M/D 게시)")
         .replaceAll("/tournaments/[0-9a-zA-Z-]+", "/tournaments/{id}");
   }
 

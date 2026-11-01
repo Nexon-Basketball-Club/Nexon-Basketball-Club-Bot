@@ -166,8 +166,9 @@ function apiGet(path, params) {
  *
  * 이력: 1 = decision 032. 2 = decision 034 — `!투표시작`이 연결된 투표를 옮기지 않는다(`movedFrom` 없음).
  * 3 = decision 035·037 — `!알림연결`(`/api/bot/alert/bind`). 메시지함의 대회 알림은 응답 모양이 같아 2도 받는다.
+ * 4 = decision 035 3단계 — `!대회`(`/api/bot/leagues`).
  */
-var BOT_API_VERSION = 3;
+var BOT_API_VERSION = 4;
 
 /**
  * POST/DELETE — 참석 신청과 취소가 쓴다.
@@ -422,6 +423,7 @@ function helpText() {
     " !회비 <이름>      회원·회비·게스트비\n" +
     " !게스트비 <이름>  게스트비만\n" +
     " !미납            전체 미납자\n" +
+    " !대회 [검색어]   신청할 수 있는 대회\n" +
     " !핑              서버·토큰 상태 확인\n" +
     "\n예: !회비 원동현"
   );
@@ -880,6 +882,16 @@ function handleAlertBind(params, room) {
   return res.reply;
 }
 
+/**
+ * `!대회 [검색어]` — 지금 신청할 수 있는 대회(메인 저장소 decision 035 #15). 누구나, 어느 방에서나.
+ * 답장은 서버가 만든다 — 운영진이 받는 묶음 알림과 같은 한 줄 모양이어야 해서다. 검색어는 제목에서 찾는다.
+ */
+function handleLeagues(params) {
+  var res = apiGet("/api/bot/leagues", params.length > 0 ? { q: params.join(" ") } : {});
+  if (res.error) return res.error;
+  return res.text;
+}
+
 // sender/room이 여기까지 내려오는 건 참석 투표 때문이다 — 조회 명령어는 안 쓴다.
 function handleCommand(command, params, sender, room, isGroupChat) {
   switch (command) {
@@ -906,6 +918,9 @@ function handleCommand(command, params, sender, room, isGroupChat) {
 
     case "알림연결":
       return handleAlertBind(params, room);
+
+    case "대회":
+      return handleLeagues(params);
 
     case "미납":
       return handleUnpaid();
@@ -998,7 +1013,7 @@ function onStartCompile() {
 
 function onCreate(savedInstanceState, activity) {
   var view = new android.widget.TextView(activity);
-  view.setText("NBC 회비 봇\n\n!참석 [선택지]\n!취소\n!투표현황\n!내순번\n!투표시작 <코드> (총무)\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!핑");
+  view.setText("NBC 회비 봇\n\n!참석 [선택지]\n!취소\n!투표현황\n!내순번\n!투표시작 <코드> (총무)\n!회비 <이름>\n!게스트비 <이름>\n!미납\n!대회 [검색어]\n!알림연결 <코드> (운영진)\n!핑");
   view.setTextColor(android.graphics.Color.DKGRAY);
   activity.setContentView(view);
 }

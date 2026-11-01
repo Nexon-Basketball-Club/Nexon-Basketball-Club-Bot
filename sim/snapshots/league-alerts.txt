@@ -17,7 +17,7 @@
 · 그 밖의 대회 소식: 매일 09:00 묶음
 
 [지금 신청 가능 2건]
-· [BDR 신청] [시나리오] 2026년 17차 BDR 스타터스리그 - 비등록비선출 (남성 일반부 D7) — D-5 (MM/DD HH:MM)
+· [BDR 신청] [시나리오] 2026년 17차 BDR 스타터스리그 - 비등록비선출 (남성 일반부 D7) — D-5 (MM/DD HH:MM) · 신청 2/6팀
   https://bdr-join-v1.vercel.app/tournaments/{id}
 · [시나리오] 2027 용인 D5 디비전리그 — D-30 (MM/DD HH:MM)
   https://www.kba-il.kr/league/league_introduce.php?champs_id=99901
@@ -31,4 +31,27 @@
 
 > !알림연결 5150
 코드가 맞지 않거나 만료됐습니다. 웹의 대회 화면에서 새로 받아 주세요.
+
+> !대회
+지금 신청할 수 있는 대회
+
+[신청 가능 2건]
+· [BDR 신청] [시나리오] 2026년 17차 BDR 스타터스리그 - 비등록비선출 (남성 일반부 D7) — D-5 (MM/DD HH:MM) · 신청 2/6팀
+  https://bdr-join-v1.vercel.app/tournaments/{id}
+· [시나리오] 2027 용인 D5 디비전리그 — D-30 (MM/DD HH:MM)
+  https://www.kba-il.kr/league/league_introduce.php?champs_id=99901
+
+[BDR 최근 공지 1건]
+· [BDR] [시나리오] 제1회 판교 직장인 농구리그 참가팀 모집 (M/D 게시)
+  https://m.cafe.daum.net/dongarry/Dnbw/99990
+
+> !대회 용인
+'용인' 대회
+
+[신청 가능 1건]
+· [시나리오] 2027 용인 D5 디비전리그 — D-30 (MM/DD HH:MM)
+  https://www.kba-il.kr/league/league_introduce.php?champs_id=99901
+
+> !대회 없는말
+'없는말' — 지금 신청할 수 있는 대회가 없습니다.
 
