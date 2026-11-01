@@ -165,8 +165,9 @@ function apiGet(path, params) {
  * 없습니다"처럼 엉뚱하게 실패했다(032 배포 때 실제로). 이제 "봇이 옛 버전입니다"가 나온다.
  *
  * 이력: 1 = decision 032. 2 = decision 034 — `!투표시작`이 연결된 투표를 옮기지 않는다(`movedFrom` 없음).
+ * 3 = decision 035·037 — `!알림연결`(`/api/bot/alert/bind`). 메시지함의 대회 알림은 응답 모양이 같아 2도 받는다.
  */
-var BOT_API_VERSION = 2;
+var BOT_API_VERSION = 3;
 
 /**
  * POST/DELETE — 참석 신청과 취소가 쓴다.
@@ -862,6 +863,23 @@ function handleUnpaid() {
   return formatUnpaid(res);
 }
 
+/**
+ * `!알림연결 <코드>` — 이 방을 대회 알림 방으로 연결한다(메인 저장소 decision 035·037). 운영진이 웹에서
+ * 받은 **자기 코드**(4자리, 30분, 한 번 쓰면 끝)를 친다. 투표 연결과 달리 **개인톡에서도 된다** — 운영진
+ * 각자 봇과의 1:1 톡으로 받는 게 기본 쓰임이다.
+ *
+ * 답장은 서버가 만든다(안내 + 지금 신청할 수 있는 대회). 거부 문구도 서버 것(`res.error`).
+ * 도움말에는 안 띄운다 — `!투표시작`처럼 운영진이 웹에서 코드를 받아 치는 명령이다.
+ */
+function handleAlertBind(params, room) {
+  if (params.length === 0) return "사용법: !알림연결 <웹에 나온 4자리 코드>";
+  var res = apiSend("POST", "/api/bot/alert/bind", { code: params[0], room: String(room) });
+  if (res.error) return res.error;
+  // 연결하자마자 쌓여 있던 알림이 있으면 답장 뒤에 바로 나가게
+  outboxDirty = true;
+  return res.reply;
+}
+
 // sender/room이 여기까지 내려오는 건 참석 투표 때문이다 — 조회 명령어는 안 쓴다.
 function handleCommand(command, params, sender, room, isGroupChat) {
   switch (command) {
@@ -885,6 +903,9 @@ function handleCommand(command, params, sender, room, isGroupChat) {
 
     case "투표시작":
       return handleBind(params, room, isGroupChat);
+
+    case "알림연결":
+      return handleAlertBind(params, room);
 
     case "미납":
       return handleUnpaid();

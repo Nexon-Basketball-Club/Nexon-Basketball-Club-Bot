@@ -352,7 +352,15 @@ public class Sim {
         .replaceAll("(\\d+일 \\d+시간|\\d+시간 \\d+분|\\d+분) 남음", "N 남음")
         .replaceAll("\\d{4} Q[1-4] 회원", "YYYY Qn 회원")
         // 연결 공지의 명단 링크. 투표 id는 시나리오를 심을 때마다 새로 생긴다.
-        .replaceAll("/poll/[0-9a-f-]{36}", "/poll/{id}");
+        .replaceAll("/poll/[0-9a-f-]{36}", "/poll/{id}")
+        // 대회 알림(메인 저장소 decision 035·037). 시나리오가 날짜를 오늘 기준으로 심어서 날마다 바뀐다.
+        // **대회 문구의 자리에서만** 가린다 — 맨 날짜·"(12/12)"를 통째로 가렸더니 same-name의 고정 날짜와
+        // poll의 정원 표시까지 지워졌다. D-N의 N은 시나리오가 고정한 값이라 남긴다.
+        .replaceAll("대회 소식 \\d{1,2}/\\d{1,2}\\([월화수목금토일]\\)", "대회 소식 M/D(요)")
+        .replaceAll("(D-\\d+) \\(\\d{2}/\\d{2}( \\d{2}:\\d{2})?\\)", "$1 (MM/DD HH:MM)")
+        .replaceAll("(대회|신청) \\d{4}-\\d{2}-\\d{2} ~ (\\d{4}-)?\\d{2}-\\d{2}", "$1 YYYY-MM-DD ~ MM-DD")
+        .replaceAll("(대회|신청) \\d{4}-\\d{2}-\\d{2}", "$1 YYYY-MM-DD")
+        .replaceAll("/tournaments/[0-9a-zA-Z-]+", "/tournaments/{id}");
   }
 
   /** 줄 단위로 첫 차이 지점을 보여준다. 스냅샷이 길어도 어디가 바뀌었는지 바로 보이게. */
